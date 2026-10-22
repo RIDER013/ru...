@@ -10,6 +10,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.media.session.MediaSession
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
@@ -20,6 +25,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
+import android.view.KeyEvent
 import java.util.Locale
 
 class VoiceWakeWordService : Service() {
@@ -28,17 +34,28 @@ class VoiceWakeWordService : Service() {
     private var isListening = false
     private var wakeWord = "RIDER"
 
+    // Proximity Sensor (Wave hand near top of phone to swipe up)
+    private var sensorManager: SensorManager? = null
+    private var proximitySensor: Sensor? = null
+    private var proximityListener: SensorEventListener? = null
+
+    // MediaSession to capture real Bluetooth Earbud Touch Sensor clicks
+    private var mediaSession: MediaSession? = null
+
     override fun onCreate() {
         super.onCreate()
         isServiceRunning = true
         createNotificationChannel()
+
+        initProximitySensor()
+        initMediaSessionForEarbuds()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         wakeWord = intent?.getStringExtra(EXTRA_WAKE_WORD) ?: "RIDER"
 
         try {
-            val notification = buildForegroundNotification("Listening for '$wakeWord' in background...")
+            val notification = buildForegroundNotification("RIDER Active: Say 'Varti', 'Rider', 'Buddy' or wave near sensor")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(
                     NOTIFICATION_ID,
@@ -52,21 +69,93 @@ class VoiceWakeWordService : Service() {
             Log.e(TAG, "Failed to start foreground notification: ${e.message}")
         }
 
-        // Only start listening if microphone permission is granted
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             startContinuousListening()
-        } else {
-            Log.w(TAG, "Cannot start listening: RECORD_AUDIO permission not granted")
         }
 
         return START_STICKY
     }
 
-    private fun startContinuousListening() {
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            Log.e(TAG, "Speech recognition unavailable on this device")
-            return
+    /**
+     * Proximity Sensor: Swipes up when a finger/hand/glove passes near the top of the phone
+     */
+    private fun initProximitySensor() {
+        try {
+            sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+            proximitySensor = sensorManager?.getDefaultSensor(Sensor.TYPE_PROXIMITY)
+
+            if (proximitySensor != null) {
+                proximityListener = object : SensorEventListener {
+                    private var lastTriggerTime = 0L
+
+                    override fun onSensorChanged(event: SensorEvent?) {
+                        if (event == null) return
+                        val distance = event.values[0]
+                        val max = proximitySensor?.maximumRange ?: 5f
+
+                        // Finger/hand is close to phone top sensor
+                        if (distance < max || distance <= 3f) {
+                            val now = System.currentTimeMillis()
+                            if (now - lastTriggerTime > 650) {
+                                lastTriggerTime = now
+                                Log.d(TAG, "Proximity hand wave detected! Swiping up at center...")
+                                triggerHapticFeedback()
+                                RiderAccessibilityService.instance?.swipeUp()
+                            }
+                        }
+                    }
+
+                    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+                }
+
+                sensorManager?.registerListener(
+                    proximityListener,
+                    proximitySensor,
+                    SensorManager.SENSOR_DELAY_UI
+                )
+                Log.d(TAG, "Proximity sensor registered successfully")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error initializing proximity sensor: ${e.message}")
         }
+    }
+
+    /**
+     * MediaSession: Intercepts physical Bluetooth Earbud touch sensor taps (Play/Pause, Next, Hook)
+     * and performs the swipe gesture!
+     */
+    private fun initMediaSessionForEarbuds() {
+        try {
+            mediaSession = MediaSession(this, "RiderEarbudsSession").apply {
+                setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
+                setCallback(object : MediaSession.Callback() {
+                    override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
+                        val keyEvent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            mediaButtonIntent.getParcelableExtra(Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            mediaButtonIntent.getParcelableExtra(Intent.EXTRA_KEY_EVENT)
+                        }
+
+                        if (keyEvent?.action == KeyEvent.ACTION_DOWN) {
+                            Log.d(TAG, "Real Earbud Touch Sensor clicked: key ${keyEvent.keyCode}! Swiping up...")
+                            triggerHapticFeedback()
+                            RiderAccessibilityService.instance?.swipeUp()
+                            return true
+                        }
+                        return super.onMediaButtonEvent(mediaButtonIntent)
+                    }
+                })
+                isActive = true
+            }
+            Log.d(TAG, "MediaSession for earbuds touch sensor active")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting up MediaSession for earbuds: ${e.message}")
+        }
+    }
+
+    private fun startContinuousListening() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) return
 
         try {
             speechRecognizer?.destroy()
@@ -77,7 +166,6 @@ class VoiceWakeWordService : Service() {
                 setRecognitionListener(object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) {
                         isListening = true
-                        Log.d(TAG, "Ready for speech")
                     }
 
                     override fun onBeginningOfSpeech() {}
@@ -89,11 +177,9 @@ class VoiceWakeWordService : Service() {
 
                     override fun onError(error: Int) {
                         isListening = false
-                        Log.d(TAG, "Speech error code: $error. Scheduling restart...")
-                        // Avoid aggressive loop on error
                         android.os.Handler(mainLooper).postDelayed({
                             startListeningIntent()
-                        }, 1200)
+                        }, 1000)
                     }
 
                     override fun onResults(results: Bundle?) {
@@ -101,10 +187,9 @@ class VoiceWakeWordService : Service() {
                         val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         handleRecognizedText(matches)
 
-                        // Restart continuous listening
                         android.os.Handler(mainLooper).postDelayed({
                             startListeningIntent()
-                        }, 500)
+                        }, 400)
                     }
 
                     override fun onPartialResults(partialResults: Bundle?) {
@@ -124,10 +209,7 @@ class VoiceWakeWordService : Service() {
 
     private fun startListeningIntent() {
         if (speechRecognizer == null) return
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            Log.w(TAG, "Cannot listen: missing RECORD_AUDIO permission")
-            return
-        }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -138,29 +220,35 @@ class VoiceWakeWordService : Service() {
 
         try {
             speechRecognizer?.startListening(intent)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start listening: ${e.message}")
-        }
+        } catch (_: Exception) {}
     }
 
+    /**
+     * Checks heard speech for "Varti", "Varti ghe", "Rider", "Buddy", "Swipe"
+     */
     private fun handleRecognizedText(matches: List<String>?) {
         if (matches.isNullOrEmpty()) return
 
         for (text in matches) {
             val lower = text.lowercase(Locale.ROOT)
-            Log.d(TAG, "Heard phrase: $lower (Target: $wakeWord)")
+            Log.d(TAG, "Heard phrase: $lower")
 
-            val target = wakeWord.lowercase(Locale.ROOT)
-            val matched = when (target) {
-                "rider" -> lower.contains("rider") || lower.contains("ryder") || lower.contains("swipe")
-                "buddy" -> lower.contains("buddy") || lower.contains("buddie") || lower.contains("swipe")
-                else -> lower.contains(target)
+            val isVarti = lower.contains("varti") || lower.contains("var") || lower.contains("वर") || lower.contains("वरती")
+            val isRider = lower.contains("rider") || lower.contains("ryder")
+            val isBuddy = lower.contains("buddy") || lower.contains("buddie")
+            val isSwipe = lower.contains("swipe") || lower.contains("up")
+
+            val matched = when (wakeWord.lowercase(Locale.ROOT)) {
+                "varti" -> isVarti || isSwipe || isRider || isBuddy
+                "rider" -> isRider || isVarti || isSwipe
+                "buddy" -> isBuddy || isVarti || isSwipe
+                else -> isVarti || isRider || isBuddy || isSwipe
             }
 
             if (matched) {
                 triggerHapticFeedback()
                 val success = RiderAccessibilityService.instance?.swipeUp() ?: false
-                Log.d(TAG, "Wake word triggered swipeUp: $success")
+                Log.d(TAG, "Word matched! Swiped up: $success")
                 break
             }
         }
@@ -184,16 +272,14 @@ class VoiceWakeWordService : Service() {
             try {
                 val channel = NotificationChannel(
                     CHANNEL_ID,
-                    "Rider Assistant Background Voice",
+                    "Rider Assistant Voice & Sensors",
                     NotificationManager.IMPORTANCE_LOW
                 ).apply {
-                    description = "Keeps voice wake-word active in the background"
+                    description = "Active voice recognition and gesture sensors in background"
                 }
                 val manager = getSystemService(NotificationManager::class.java)
                 manager?.createNotificationChannel(channel)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to create notification channel: ${e.message}")
-            }
+            } catch (_: Exception) {}
         }
     }
 
@@ -213,20 +299,29 @@ class VoiceWakeWordService : Service() {
         }
 
         return builder
-            .setContentTitle("Rider Assistant")
+            .setContentTitle("RIDER")
             .setContentText(contentText)
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
     }
+
     override fun onDestroy() {
         isServiceRunning = false
         try {
             speechRecognizer?.destroy()
         } catch (_: Exception) {}
         speechRecognizer = null
-        isListening = false
+
+        try {
+            proximityListener?.let { sensorManager?.unregisterListener(it) }
+        } catch (_: Exception) {}
+
+        try {
+            mediaSession?.release()
+        } catch (_: Exception) {}
+
         super.onDestroy()
     }
 

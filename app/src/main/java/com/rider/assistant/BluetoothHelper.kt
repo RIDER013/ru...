@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
@@ -13,9 +14,9 @@ import android.util.Log
 data class EarbudsState(
     val connected: Boolean,
     val name: String,
-    val leftBattery: Int,
-    val caseBattery: Int,
-    val rightBattery: Int,
+    val leftBattery: Int, // -1 if unknown/unavailable from OS
+    val caseBattery: Int, // -1 if unknown/unavailable from OS
+    val rightBattery: Int, // -1 if unknown/unavailable from OS
     val address: String
 )
 
@@ -24,8 +25,7 @@ class BluetoothHelper(private val context: Context) {
     private val bluetoothManager: BluetoothManager? by lazy {
         try {
             context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
-        } catch (e: Exception) {
-            Log.e(TAG, "BluetoothManager error: ${e.message}")
+        } catch (_: Exception) {
             null
         }
     }
@@ -33,7 +33,7 @@ class BluetoothHelper(private val context: Context) {
     private val adapter: BluetoothAdapter?
         get() = try {
             bluetoothManager?.adapter
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
 
@@ -45,73 +45,45 @@ class BluetoothHelper(private val context: Context) {
         }
     }
 
-    val isBluetoothAvailable: Boolean
-        get() = adapter != null
-
-    val isBluetoothEnabled: Boolean
-        get() {
-            if (!hasBluetoothPermission()) return false
-            return try {
-                adapter?.isEnabled == true
-            } catch (e: Exception) {
-                false
-            }
-        }
-
     @SuppressLint("MissingPermission")
     fun getEarbudsState(): EarbudsState {
-        // Safe check: do not call bluetooth APIs if permission is missing (prevents SecurityException crash)
         if (!hasBluetoothPermission()) {
-            Log.d(TAG, "BLUETOOTH_CONNECT permission not yet granted; returning disconnected state safely")
-            return EarbudsState(
-                connected = false,
-                name = "",
-                leftBattery = 0,
-                caseBattery = 0,
-                rightBattery = 0,
-                address = ""
-            )
+            return EarbudsState(false, "", -1, -1, -1, "")
         }
 
         return try {
             val adp = adapter
             if (adp == null || !adp.isEnabled) {
-                return EarbudsState(false, "", 0, 0, 0, "")
+                return EarbudsState(false, "", -1, -1, -1, "")
+            }
+
+            val headsetConnected = adp.getProfileConnectionState(BluetoothProfile.HEADSET) == BluetoothAdapter.STATE_CONNECTED
+            val a2dpConnected = adp.getProfileConnectionState(BluetoothProfile.A2DP) == BluetoothAdapter.STATE_CONNECTED
+
+            if (!headsetConnected && !a2dpConnected) {
+                return EarbudsState(false, "", -1, -1, -1, "")
             }
 
             val bonded = adp.bondedDevices.orEmpty()
             for (dev in bonded) {
-                val devName = try { dev.name.orEmpty() } catch (_: Exception) { "" }
-                val deviceClass = try { dev.bluetoothClass?.deviceClass ?: 0 } catch (_: Exception) { 0 }
-                val isAudio = deviceClass == 1028 || deviceClass == 1032 || deviceClass == 1048 // Headset/Wearable/Audio
+                val battery = readDeviceBattery(dev)
+                val devName = dev.name ?: "Bluetooth Earbuds"
 
-                if (isAudio || devName.contains("Bud", ignoreCase = true) ||
-                    devName.contains("Air", ignoreCase = true) ||
-                    devName.contains("Pod", ignoreCase = true) ||
-                    devName.contains("Head", ignoreCase = true) ||
-                    devName.contains("Wireless", ignoreCase = true)) {
-
-                    val battery = readDeviceBattery(dev)
-                    val baseBat = if (battery in 1..100) battery else 88
-
-                    return EarbudsState(
-                        connected = true,
-                        name = if (devName.isNotBlank()) devName else "Bluetooth Earbuds",
-                        leftBattery = baseBat,
-                        caseBattery = minOf(100, baseBat + 5),
-                        rightBattery = maxOf(5, baseBat - 2),
-                        address = try { dev.address.orEmpty() } catch (_: Exception) { "" }
-                    )
-                }
+                // If OS doesn't provide battery (-1), show -1 (displayed as N/A in UI) instead of fake numbers
+                return EarbudsState(
+                    connected = true,
+                    name = devName,
+                    leftBattery = if (battery in 0..100) battery else -1,
+                    caseBattery = -1, // Case battery is rarely exposed by standard Android Bluetooth API
+                    rightBattery = if (battery in 0..100) battery else -1,
+                    address = dev.address ?: ""
+                )
             }
 
-            EarbudsState(false, "", 0, 0, 0, "")
-        } catch (se: SecurityException) {
-            Log.w(TAG, "SecurityException reading Bluetooth: ${se.message}")
-            EarbudsState(false, "", 0, 0, 0, "")
+            EarbudsState(false, "", -1, -1, -1, "")
         } catch (e: Exception) {
-            Log.e(TAG, "Unexpected error reading Bluetooth: ${e.message}")
-            EarbudsState(false, "", 0, 0, 0, "")
+            Log.e(TAG, "Error checking real bluetooth: ${e.message}")
+            EarbudsState(false, "", -1, -1, -1, "")
         }
     }
 

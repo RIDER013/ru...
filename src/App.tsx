@@ -7,16 +7,11 @@ import {
   BatteryCharging,
   Shield,
   Play,
-  Volume2,
   Sparkles,
-  Check,
-  X,
   Repeat
 } from 'lucide-react';
 
-type AssistantName = 'RIDER' | 'BUDDY';
-type RemoteRole = 'BOTH' | 'LEFT' | 'RIGHT';
-type AudioOutput = 'STEREO' | 'LEFT' | 'RIGHT';
+type AssistantName = 'VARTI' | 'RIDER' | 'BUDDY';
 
 interface EarbudDevice {
   name: string;
@@ -30,17 +25,10 @@ interface EarbudDevice {
 export default function App() {
   const [activeTab, setActiveTab] = useState<'home' | 'bluetooth'>('home');
 
-  // Assistant & Wake-word State
-  const [selectedAssistant, setSelectedAssistant] = useState<AssistantName>('RIDER');
+  // Assistant & Wake-word State: Default to "VARTI" as requested!
+  const [selectedAssistant, setSelectedAssistant] = useState<AssistantName>('VARTI');
   const [accessibilityGranted, setAccessibilityGranted] = useState<boolean>(false);
   const [showAccessibilityModal, setShowAccessibilityModal] = useState<boolean>(false);
-
-  // Background Service Active State
-  const [serviceRunning, setServiceRunning] = useState<boolean>(false);
-
-  // Earbuds Remote & Audio Routing Settings
-  const [remoteEarbud, setRemoteEarbud] = useState<RemoteRole>('BOTH');
-  const [audioRouting, setAudioRouting] = useState<AudioOutput>('STEREO');
 
   // Gesture Swipe State
   const [isSwiping, setIsSwiping] = useState<boolean>(false);
@@ -87,7 +75,6 @@ export default function App() {
   };
 
   // Small Play / Start button handler
-  // "lets start te fkt ek lahans button asel tyavar kahi text nko"
   const handleStartToggle = () => {
     if (!accessibilityGranted) {
       setShowAccessibilityModal(true);
@@ -95,16 +82,28 @@ export default function App() {
       return;
     }
 
-    setServiceRunning(true);
-    showToast(`RIDER Active! Say "${selectedAssistant}" to swipe`, 3000);
+    showToast(`RIDER Active! Say "${getAssistantDisplay()}", or wave hand near top sensor to swipe.`, 3500);
   };
 
-  // Single button toggle between Say Rider and Say Buddy
-  // "tyat asel say riderr aani budy tyavar click kel ki donhi madheun change karaych option yeil oky"
+  // Single button toggle cycling through Varti -> Rider -> Buddy
+  // "tyat rider aani budy chya jagevar varti ghe as pan add kar oky fkt varti as aayku aal tari gheil oky"
   const handleToggleWakeWord = () => {
-    const nextAssistant = selectedAssistant === 'RIDER' ? 'BUDDY' : 'RIDER';
+    const nextAssistant =
+      selectedAssistant === 'VARTI' ? 'RIDER' : selectedAssistant === 'RIDER' ? 'BUDDY' : 'VARTI';
     setSelectedAssistant(nextAssistant);
-    showToast(`Switched to "Say ${nextAssistant}"! Tap again to switch`, 2000);
+    const display = nextAssistant === 'VARTI' ? 'Say Varti (वरती)' : `Say ${nextAssistant}`;
+    showToast(`Switched to "${display}"! Tap to switch again`, 2000);
+  };
+
+  const getAssistantDisplay = () => {
+    if (selectedAssistant === 'VARTI') return 'Varti (वरती)';
+    return selectedAssistant;
+  };
+
+  const getNextOptionName = () => {
+    if (selectedAssistant === 'VARTI') return 'Rider';
+    if (selectedAssistant === 'RIDER') return 'Buddy';
+    return 'Varti';
   };
 
   const confirmAccessibilityPermission = () => {
@@ -145,13 +144,13 @@ export default function App() {
         </div>
       )}
 
-      {/* TOP HEADER: Clean & transparent, ribbon removed ("hi rebbon kaadh oky") */}
+      {/* TOP HEADER */}
       <header className="w-full px-5 pt-5 pb-2 flex items-center justify-between">
         <div className="flex items-center space-x-2.5">
           <img
-            src="/assets/aistudio/image_3001ac4a.png"
+            src="/assets/aistudio/image_20a2461d.png"
             alt="RIDER"
-            className="w-8 h-8 rounded-xl object-cover border border-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.4)]"
+            className="w-8 h-8 rounded-xl object-cover border border-sky-400/50 shadow-[0_0_10px_rgba(56,189,248,0.4)]"
           />
           <h1 className="text-xl font-black text-[#38bdf8] tracking-widest leading-none">
             RIDER
@@ -176,13 +175,12 @@ export default function App() {
       <main className="flex-1 w-full max-w-sm mx-auto flex flex-col justify-center px-4 py-2">
 
         {/* ========================================================== */}
-        {/* 1. HOME SCREEN: Minimal, small play button & Say button    */}
+        {/* 1. HOME SCREEN: Play Start, Wake Word (Varti/Rider/Buddy)  */}
         {/* ========================================================== */}
         {activeTab === 'home' && (
           <div className="w-full flex-1 flex flex-col justify-center items-center py-6 space-y-7 animate-fade-in">
 
-            {/* Small icon-only "LET'S START" button (no text)
-                "lets start te fkt ek lahans button asel tyavar kahi text nko" */}
+            {/* Small icon-only "LET'S START" button */}
             <div className="flex flex-col items-center">
               <button
                 onClick={handleStartToggle}
@@ -193,32 +191,31 @@ export default function App() {
               </button>
             </div>
 
-            {/* Combined "Say Rider" / "Say Buddy" Interactive Button
-                "fkt he button naavach aahe na te asu de tyat asel say riderr aani budy tyavar click kel ki donhi madheun change karaych option yeil oky" */}
+            {/* Combined "Say Varti" / "Say Rider" / "Say Buddy" Interactive Button */}
             <div className="w-full flex flex-col items-center space-y-2.5">
               <button
                 onClick={handleToggleWakeWord}
-                className="w-full py-3.5 px-5 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 active:scale-98 text-white font-bold text-sm tracking-wide shadow-lg transition-all flex items-center justify-between group"
+                className="w-full py-3.5 px-5 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 active:scale-98 text-white font-bold text-sm tracking-wide shadow-lg transition-all flex items-center justify-between group cursor-pointer"
               >
                 <div className="flex items-center space-x-2">
                   <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping" />
                   <span className="text-white text-sm">
-                    Say <span className="text-[#38bdf8] font-black">{selectedAssistant}</span>
+                    Say <span className="text-[#38bdf8] font-black">{getAssistantDisplay()}</span>
                   </span>
                 </div>
 
                 <div className="flex items-center space-x-1.5 text-xs text-slate-400 group-hover:text-sky-300">
                   <Repeat className="w-3.5 h-3.5" />
                   <span className="text-[11px]">
-                    Switch to {selectedAssistant === 'RIDER' ? 'Buddy' : 'Rider'}
+                    Tap for {getNextOptionName()}
                   </span>
                 </div>
               </button>
 
-              {/* Quick Test Trigger for current selection */}
+              {/* Quick Test Trigger */}
               <button
                 onClick={() => triggerCenterSwipe(`Say ${selectedAssistant}`)}
-                className="text-xs text-sky-400 hover:text-sky-300 flex items-center space-x-1 py-1 px-3 rounded-lg hover:bg-slate-800/40 transition-colors"
+                className="text-xs text-sky-400 hover:text-sky-300 flex items-center space-x-1 py-1 px-3 rounded-lg hover:bg-slate-800/40 transition-colors cursor-pointer"
               >
                 <ChevronUp className="w-3.5 h-3.5" />
                 <span>Test "Say {selectedAssistant}" Swipe</span>
@@ -229,73 +226,71 @@ export default function App() {
         )}
 
         {/* ========================================================== */}
-        {/* 2. BLUETOOTH SCREEN: Compact Earbuds with Sensors & Modes */}
+        {/* 2. BLUETOOTH SCREEN: Clean Charging & Touch Sensors Only   */}
         {/* ========================================================== */}
         {activeTab === 'bluetooth' && (
-          <div className="w-full flex-1 flex flex-col justify-center py-2 space-y-3.5 animate-fade-in">
+          <div className="w-full flex-1 flex flex-col justify-center py-4 space-y-5 animate-fade-in">
             
+            {/* Device Name */}
             <div className="text-center">
-              <h2 className="text-sm font-bold text-white tracking-wide">
+              <h2 className="text-base font-bold text-white tracking-wide">
                 {device.name}
               </h2>
-              <p className="text-[10px] text-sky-400 font-mono">
-                Touch Sensors Active
-              </p>
             </div>
 
-            {/* Compact Earbuds & Case with Touch Sensors
-                "tyache sensores aahet na tyavar click kel ki swip whav oky" */}
-            <div className="grid grid-cols-3 gap-2 items-center">
+            {/* Earbuds & Case with Touch Sensors & Charging
+                "konty pan bird chya sensor la tuch kel ki swipe vhv oky yaat fkt charging dakhvel oky riyal" */}
+            <div className="grid grid-cols-3 gap-2.5 items-center">
               
               {/* Left Earbud */}
-              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-2 flex flex-col items-center">
+              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-2.5 flex flex-col items-center">
                 <span className="text-[9px] font-bold text-sky-400 mb-0.5">LEFT</span>
                 <button
                   onClick={() => triggerCenterSwipe('Left Earbud Sensor')}
                   className="relative p-1 rounded-lg hover:bg-slate-800 transition-all text-center group cursor-pointer"
                   title="Click sensor to swipe"
                 >
-                  <div className="w-10 h-14 flex items-center justify-center">
+                  <div className="w-11 h-14 flex items-center justify-center">
                     <LeftEarbudSvg />
                   </div>
                   <span className="text-[8px] px-1 py-0.2 rounded bg-sky-500/20 text-sky-300 border border-sky-400/40 block mt-0.5 font-semibold">
                     Sensor
                   </span>
                 </button>
-                <div className="w-full mt-1 pt-1 border-t border-slate-800 text-center text-[10px] font-bold text-white flex items-center justify-center space-x-0.5">
+                <div className="w-full mt-1.5 pt-1 border-t border-slate-800 text-center text-[11px] font-bold text-white flex items-center justify-center space-x-1">
                   <Battery className="w-3 h-3 text-emerald-400" />
                   <span>{device.leftBattery}%</span>
                 </div>
               </div>
 
               {/* Case */}
-              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-2 flex flex-col items-center">
+              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-2.5 flex flex-col items-center">
                 <span className="text-[9px] font-bold text-slate-400 mb-0.5">CASE</span>
-                <div className="w-10 h-14 flex items-center justify-center">
+                <div className="w-11 h-14 flex items-center justify-center">
                   <EarbudsCaseSvg />
                 </div>
-                <div className="w-full mt-1 pt-1 border-t border-slate-800 text-center text-[10px] font-bold text-white flex items-center justify-center space-x-0.5">
+                <div className="w-full mt-1.5 pt-1 border-t border-slate-800 text-center text-[11px] font-bold text-white flex items-center justify-center space-x-1">
                   <BatteryCharging className="w-3 h-3 text-sky-400" />
                   <span>{device.caseBattery}%</span>
                 </div>
               </div>
 
               {/* Right Earbud */}
-              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-2 flex flex-col items-center">
+              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-2.5 flex flex-col items-center">
                 <span className="text-[9px] font-bold text-sky-400 mb-0.5">RIGHT</span>
                 <button
                   onClick={() => triggerCenterSwipe('Right Earbud Sensor')}
                   className="relative p-1 rounded-lg hover:bg-slate-800 transition-all text-center group cursor-pointer"
                   title="Click sensor to swipe"
                 >
-                  <div className="w-10 h-14 flex items-center justify-center">
+                  <div className="w-11 h-14 flex items-center justify-center">
                     <RightEarbudSvg />
                   </div>
                   <span className="text-[8px] px-1 py-0.2 rounded bg-sky-500/20 text-sky-300 border border-sky-400/40 block mt-0.5 font-semibold">
                     Sensor
                   </span>
                 </button>
-                <div className="w-full mt-1 pt-1 border-t border-slate-800 text-center text-[10px] font-bold text-white flex items-center justify-center space-x-0.5">
+                <div className="w-full mt-1.5 pt-1 border-t border-slate-800 text-center text-[11px] font-bold text-white flex items-center justify-center space-x-1">
                   <Battery className="w-3 h-3 text-emerald-400" />
                   <span>{device.rightBattery}%</span>
                 </div>
@@ -303,63 +298,12 @@ export default function App() {
 
             </div>
 
-            {/* Gesture Remote Configuration */}
-            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-2.5 space-y-1.5">
-              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
-                Earbud Remote Mode
-              </span>
-              <div className="grid grid-cols-3 gap-1">
-                {(['BOTH', 'LEFT', 'RIGHT'] as RemoteRole[]).map((role) => (
-                  <button
-                    key={role}
-                    onClick={() => {
-                      setRemoteEarbud(role);
-                      showToast(`Remote: ${role} Earbud`, 1500);
-                    }}
-                    className={`py-1 px-1.5 rounded-lg text-[10px] font-bold transition-all ${
-                      remoteEarbud === role
-                        ? 'bg-sky-500 text-slate-950 shadow-sm'
-                        : 'bg-slate-800/60 text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    {role === 'BOTH' ? 'Both' : role}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Audio Voice Feedback Routing */}
-            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-2.5 space-y-1.5">
-              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
-                Audio Output
-              </span>
-              <div className="grid grid-cols-3 gap-1">
-                {(['STEREO', 'LEFT', 'RIGHT'] as AudioOutput[]).map((mode) => (
-                  <button
-                    key={mode}
-                    onClick={() => {
-                      setAudioRouting(mode);
-                      showToast(`Audio: ${mode}`, 1500);
-                    }}
-                    className={`py-1 px-1.5 rounded-lg text-[10px] font-bold transition-all ${
-                      audioRouting === mode
-                        ? 'bg-sky-500 text-slate-950 shadow-sm'
-                        : 'bg-slate-800/60 text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    {mode === 'STEREO' ? 'Stereo' : mode}
-                  </button>
-                ))}
-              </div>
-            </div>
-
           </div>
         )}
 
       </main>
 
-      {/* BOTTOM NAVIGATION: Reduced height / Compact ribbon ("khlchi rebbon thodi lahan kar")
-          AND "created by rider" text at the very bottom ("hw naav sarvat khali") */}
+      {/* BOTTOM NAVIGATION: Compact ribbon + "created by rider" at very bottom */}
       <footer className="w-full max-w-sm mx-auto px-4 pt-1.5 pb-2 bg-[#0b0f19] border-t border-slate-800/60 sticky bottom-0 z-30">
         <div className="grid grid-cols-2 gap-2">
           <button
@@ -387,7 +331,6 @@ export default function App() {
           </button>
         </div>
 
-        {/* "created by rider" at the VERY BOTTOM ("hw naav sarvat khali") */}
         <p className="text-[9px] text-slate-500 text-center tracking-widest lowercase pt-1.5 font-mono select-none">
           created by rider
         </p>
@@ -397,17 +340,6 @@ export default function App() {
       {showAccessibilityModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-[#101827] border border-sky-500/40 rounded-3xl w-full max-w-xs p-4 shadow-2xl relative">
-            <button
-              onClick={() => setShowAccessibilityModal(false)}
-              className="absolute top-3 right-3 text-slate-400 hover:text-white p-1 rounded-lg"
-            >
-              <X className="w-4 h-4" />
-            </button>
-
-            <div className="w-10 h-10 rounded-2xl bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400 mb-2.5 mx-auto">
-              <Shield className="w-5 h-5" />
-            </div>
-
             <div className="text-center mb-3">
               <h3 className="text-sm font-bold text-white">
                 Accessibility Permission
@@ -439,10 +371,7 @@ export default function App() {
   );
 }
 
-// -------------------------------------------------------------
-// COMPACT EARBUDS & CASE SVG ICONS
-// -------------------------------------------------------------
-
+// Compact Earbuds SVGs
 function LeftEarbudSvg() {
   return (
     <svg viewBox="0 0 100 130" className="w-full h-full drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">
@@ -478,7 +407,7 @@ function RightEarbudSvg() {
       <rect x="34" y="108" width="14" height="7" rx="3.5" fill="#64748b" />
       <circle cx="55" cy="42" r="26" fill="url(#budRightGrad)" />
       <ellipse cx="76" cy="42" rx="14" ry="19" fill="#f1f5f9" opacity="0.9" />
-      <ellipse cx="86" cy="42" rx="4" ry="11" fill="#334155" />
+      <ellipse cx="86" cy="42" rx="11" ry="11" fill="#334155" />
       <rect x="37" y="60" width="8" height="26" rx="4" fill="#38bdf8" />
       <text x="41" y="100" fill="#64748b" fontSize="8" fontWeight="bold" textAnchor="middle">R</text>
     </svg>
