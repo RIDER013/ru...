@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    background-color: #101827;
+    color: #ffffff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+  }
+}
+
+/* Android-like button animations */
+.android-btn {
+  background-color: #1e293b;
+  color: #ffffff;
+  border: 1px solid #334155;
+  transition: all 0.15s ease-in-out;
+}
+
+.android-btn:hover {
+  background-color: #334155;
+  border-color: #475569;
+}
+
+.android-btn:active {
+  background-color: #0f172a;
+  transform: scale(0.98);
+}
+
+.android-btn-primary {
+  background-color: #0284c7;
+  color: #ffffff;
+  border: 1px solid #38bdf8;
+}
+
+.android-btn-primary:hover {
+  background-color: #0369a1;
+  border-color: #7dd3fc;
+}
+
+.android-btn-primary:active {
+  background-color: #075985;
+  transform: scale(0.98);
+}

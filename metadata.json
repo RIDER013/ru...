@@ -1,0 +1,6 @@
+{
+  "name": "Rider Assistant",
+  "description": "Voice-activated swipe gesture assistant with wake words ('Rider' / 'Buddy') and full Bluetooth earbuds battery dashboard.",
+  "permissions": [],
+  "capabilities": []
+}
