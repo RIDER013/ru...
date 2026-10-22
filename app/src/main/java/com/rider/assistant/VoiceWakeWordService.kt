@@ -30,6 +30,7 @@ class VoiceWakeWordService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        isServiceRunning = true
         createNotificationChannel()
     }
 
@@ -219,8 +220,8 @@ class VoiceWakeWordService : Service() {
             .setOngoing(true)
             .build()
     }
-
     override fun onDestroy() {
+        isServiceRunning = false
         try {
             speechRecognizer?.destroy()
         } catch (_: Exception) {}
@@ -236,6 +237,10 @@ class VoiceWakeWordService : Service() {
         private const val NOTIFICATION_ID = 42001
         private const val CHANNEL_ID = "rider_voice_channel"
         const val EXTRA_WAKE_WORD = "extra_wake_word"
+
+        @Volatile
+        var isServiceRunning: Boolean = false
+            private set
 
         fun start(context: Context, wakeWord: String = "RIDER") {
             try {
@@ -256,6 +261,7 @@ class VoiceWakeWordService : Service() {
             try {
                 val intent = Intent(context, VoiceWakeWordService::class.java)
                 context.stopService(intent)
+                isServiceRunning = false
             } catch (_: Exception) {}
         }
     }
