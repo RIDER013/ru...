@@ -2,7 +2,6 @@ package com.rider.assistant
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -11,12 +10,14 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import androidx.appcompat.app.AppCompatActivity
 
-class MainActivity : Activity() {
+class MainActivity : AppCompatActivity() {
 
     private var selectedAssistant = "RIDER"
     private var isListeningServiceActive = false
@@ -40,41 +41,70 @@ class MainActivity : Activity() {
     private var earbudsState: EarbudsState = EarbudsState(false, "", 0, 0, 0, "")
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Crash prevention: handle any uncaught runtime exceptions safely
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            Log.e(TAG, "Uncaught exception on thread ${thread.name}: ", throwable)
+        }
+
         super.onCreate(savedInstanceState)
 
-        requestRequiredPermissions()
-        buildUi()
-        updateAccessibilityBadge()
-        refreshBluetoothData()
+        try {
+            buildUi()
+            requestRequiredPermissions()
+            updateAccessibilityBadge()
+            refreshBluetoothData()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in onCreate: ${e.message}", e)
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        updateAccessibilityBadge()
-        refreshBluetoothData()
+        try {
+            updateAccessibilityBadge()
+            refreshBluetoothData()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in onResume: ${e.message}", e)
+        }
     }
 
     private fun requestRequiredPermissions() {
-        val permissions = mutableListOf<String>()
+        try {
+            val permissions = mutableListOf<String>()
 
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            permissions.add(Manifest.permission.RECORD_AUDIO)
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.RECORD_AUDIO)
             }
-        }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                    permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+                }
             }
-        }
 
-        if (permissions.isNotEmpty()) {
-            requestPermissions(permissions.toTypedArray(), 1001)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
+
+            if (permissions.isNotEmpty()) {
+                requestPermissions(permissions.toTypedArray(), PERMISSION_REQUEST_CODE)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error requesting permissions: ${e.message}")
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == PERMISSION_REQUEST_CODE) {
+            // When permissions are answered, safely refresh Bluetooth
+            refreshBluetoothData()
         }
     }
 
@@ -127,8 +157,20 @@ class MainActivity : Activity() {
     private fun createHeader(): View {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(48, 48, 48, 24)
+            setPadding(40, 40, 40, 20)
             gravity = Gravity.CENTER_VERTICAL
+
+            // App Icon Image View
+            val iconView = ImageView(this@MainActivity).apply {
+                layoutParams = LinearLayout.LayoutParams(96, 96).apply {
+                    marginEnd = 24
+                }
+                setImageResource(R.drawable.ic_launcher)
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                background = createRoundedDrawable("#1E293B", "#38BDF8", 24f)
+                clipToOutline = true
+            }
+            addView(iconView)
 
             val titleLayout = LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.VERTICAL
@@ -137,7 +179,7 @@ class MainActivity : Activity() {
 
             val title = TextView(this@MainActivity).apply {
                 text = "RIDER ASSISTANT"
-                textSize = 22f
+                textSize = 20f
                 setTextColor(Color.parseColor("#38BDF8"))
                 setTypeface(null, Typeface.BOLD)
             }
@@ -145,7 +187,7 @@ class MainActivity : Activity() {
 
             val subtitle = TextView(this@MainActivity).apply {
                 text = "VOICE GESTURE • BLUETOOTH"
-                textSize = 11f
+                textSize = 10f
                 setTextColor(Color.parseColor("#94A3B8"))
                 setPadding(0, 4, 0, 0)
             }
@@ -156,7 +198,7 @@ class MainActivity : Activity() {
             // Accessibility permission badge
             accessibilityStatusBadge = TextView(this@MainActivity).apply {
                 textSize = 11f
-                setPadding(24, 12, 24, 12)
+                setPadding(20, 10, 20, 10)
                 background = createRoundedDrawable("#1E293B", "#334155", 20f)
                 setOnClickListener {
                     openAccessibilitySettings()
@@ -177,7 +219,7 @@ class MainActivity : Activity() {
 
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(48, 20, 48, 40)
+            setPadding(48, 16, 48, 32)
             gravity = Gravity.CENTER_HORIZONTAL
         }
 
@@ -188,7 +230,7 @@ class MainActivity : Activity() {
             setTextColor(Color.parseColor("#94A3B8"))
             setTypeface(null, Typeface.BOLD)
             gravity = Gravity.CENTER
-            setPadding(0, 10, 0, 16)
+            setPadding(0, 6, 0, 14)
         }
         layout.addView(selectorTitle)
 
@@ -203,7 +245,7 @@ class MainActivity : Activity() {
 
         riderButton = Button(this).apply {
             text = "RIDER\n(Swipe Up)"
-            textSize = 14f
+            textSize = 13f
             setTypeface(null, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                 marginEnd = 16
@@ -216,7 +258,7 @@ class MainActivity : Activity() {
 
         buddyButton = Button(this).apply {
             text = "BUDDY\n(Swipe Up)"
-            textSize = 14f
+            textSize = 13f
             setTypeface(null, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener {
@@ -228,7 +270,7 @@ class MainActivity : Activity() {
 
         updateAssistantButtonStyles()
 
-        // Center Space / Mic Toggle Button ("hllo gogle bolal ki gogle on hot tasach")
+        // Center Space / Mic Toggle Button
         val centerSpacing = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -242,10 +284,10 @@ class MainActivity : Activity() {
         micToggleButton = Button(this).apply {
             textSize = 15f
             setTypeface(null, Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(340, 340).apply {
+            layoutParams = LinearLayout.LayoutParams(320, 320).apply {
                 gravity = Gravity.CENTER
-                topMargin = 40
-                bottomMargin = 24
+                topMargin = 32
+                bottomMargin = 20
             }
             setOnClickListener {
                 toggleBackgroundVoiceService()
@@ -254,20 +296,20 @@ class MainActivity : Activity() {
         centerSpacing.addView(micToggleButton)
 
         micStatusText = TextView(this).apply {
-            textSize = 14f
+            textSize = 13f
             setTextColor(Color.parseColor("#FFFFFF"))
             gravity = Gravity.CENTER
             text = "Background Voice: Disabled"
-            setPadding(0, 8, 0, 8)
+            setPadding(0, 6, 0, 6)
         }
         centerSpacing.addView(micStatusText)
 
         val wakeDescription = TextView(this).apply {
-            text = "When active, say 'Rider' or 'Buddy' anytime (even when other apps like Instagram/Shorts are open) to swipe up at the screen center."
-            textSize = 12f
+            text = "Say 'Rider' or 'Buddy' anytime (even when other apps like Instagram/Shorts are open) to swipe up at the screen center."
+            textSize = 11f
             setTextColor(Color.parseColor("#94A3B8"))
             gravity = Gravity.CENTER
-            setPadding(20, 8, 20, 0)
+            setPadding(20, 6, 20, 0)
         }
         centerSpacing.addView(wakeDescription)
 
@@ -305,7 +347,7 @@ class MainActivity : Activity() {
 
         bluetoothStatusLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(48, 20, 48, 40)
+            setPadding(48, 16, 48, 32)
             gravity = Gravity.CENTER_HORIZONTAL
         }
 
@@ -319,8 +361,7 @@ class MainActivity : Activity() {
         bluetoothStatusLayout.removeAllViews()
 
         if (!earbudsState.connected) {
-            // NOT CONNECTED VIEW:
-            // "nasel tar fkt caase cha icone aani not conected as chotas name oky"
+            // NOT CONNECTED VIEW
             val centerWrap = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
@@ -334,12 +375,12 @@ class MainActivity : Activity() {
             // Case Icon representation
             val caseIcon = TextView(this).apply {
                 text = "🔋\n[CASE]"
-                textSize = 36f
+                textSize = 34f
                 gravity = Gravity.CENTER
                 setTextColor(Color.parseColor("#94A3B8"))
-                setPadding(40, 40, 40, 40)
+                setPadding(36, 36, 36, 36)
                 background = createRoundedDrawable("#101827", "#334155", 32f)
-                layoutParams = LinearLayout.LayoutParams(260, 260).apply {
+                layoutParams = LinearLayout.LayoutParams(240, 240).apply {
                     gravity = Gravity.CENTER
                 }
             }
@@ -350,7 +391,7 @@ class MainActivity : Activity() {
                 text = "Not Connected"
                 textSize = 15f
                 setTextColor(Color.parseColor("#94A3B8"))
-                setPadding(0, 24, 0, 8)
+                setPadding(0, 20, 0, 8)
                 setTypeface(null, Typeface.BOLD)
                 gravity = Gravity.CENTER
             }
@@ -364,9 +405,9 @@ class MainActivity : Activity() {
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 ).apply {
-                    topMargin = 24
+                    topMargin = 20
                 }
-                setPadding(48, 24, 48, 24)
+                setPadding(44, 20, 44, 20)
                 setOnClickListener {
                     simulateBluetoothConnection()
                 }
@@ -376,24 +417,23 @@ class MainActivity : Activity() {
             bluetoothStatusLayout.addView(centerWrap)
 
         } else {
-            // CONNECTED VIEW:
-            // "asel tar tyach naav ... left la left side chya air birds cha chitra aani right la ride side cya yaach oky aani khali tyanchi battr ylavele asel oky"
+            // CONNECTED VIEW
             val devName = TextView(this).apply {
                 text = earbudsState.name
-                textSize = 24f
+                textSize = 22f
                 setTextColor(Color.WHITE)
                 setTypeface(null, Typeface.BOLD)
                 gravity = Gravity.CENTER
-                setPadding(0, 16, 0, 4)
+                setPadding(0, 14, 0, 4)
             }
             bluetoothStatusLayout.addView(devName)
 
             val devAddress = TextView(this).apply {
                 text = "Connected (${earbudsState.address})"
-                textSize = 12f
+                textSize = 11f
                 setTextColor(Color.parseColor("#38BDF8"))
                 gravity = Gravity.CENTER
-                setPadding(0, 0, 0, 32)
+                setPadding(0, 0, 0, 28)
             }
             bluetoothStatusLayout.addView(devAddress)
 
@@ -427,7 +467,7 @@ class MainActivity : Activity() {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 ).apply {
-                    topMargin = 48
+                    topMargin = 40
                 }
             }
 
@@ -466,16 +506,16 @@ class MainActivity : Activity() {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(16, 24, 16, 24)
+            setPadding(12, 20, 12, 20)
             background = createRoundedDrawable("#101827", "#334155", 20f)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = 8
-                marginEnd = 8
+                marginStart = 6
+                marginEnd = 6
             }
 
             val lbl = TextView(this@MainActivity).apply {
                 text = label
-                textSize = 11f
+                textSize = 10f
                 setTextColor(Color.parseColor("#38BDF8"))
                 setTypeface(null, Typeface.BOLD)
                 gravity = Gravity.CENTER
@@ -484,15 +524,15 @@ class MainActivity : Activity() {
 
             val icon = TextView(this@MainActivity).apply {
                 text = iconStr
-                textSize = 32f
+                textSize = 28f
                 gravity = Gravity.CENTER
-                setPadding(0, 16, 0, 16)
+                setPadding(0, 12, 0, 12)
             }
             addView(icon)
 
             val bat = TextView(this@MainActivity).apply {
                 text = batteryStr
-                textSize = 16f
+                textSize = 15f
                 setTextColor(Color.WHITE)
                 setTypeface(null, Typeface.BOLD)
                 gravity = Gravity.CENTER
@@ -504,12 +544,12 @@ class MainActivity : Activity() {
     private fun createBottomNav(): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(32, 16, 32, 24)
+            setPadding(28, 14, 28, 20)
             background = createRoundedDrawable("#0F172A", "#1E293B", 0f)
 
             val homeTab = Button(this@MainActivity).apply {
                 text = "ASSISTANT"
-                textSize = 13f
+                textSize = 12f
                 setTypeface(null, Typeface.BOLD)
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                     marginEnd = 16
@@ -520,7 +560,7 @@ class MainActivity : Activity() {
 
             val btTab = Button(this@MainActivity).apply {
                 text = "BLUETOOTH"
-                textSize = 13f
+                textSize = 12f
                 setTypeface(null, Typeface.BOLD)
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 setOnClickListener { switchTab("bluetooth") }
@@ -573,8 +613,14 @@ class MainActivity : Activity() {
 
     private fun toggleBackgroundVoiceService() {
         if (!RiderAccessibilityService.isServiceRunning) {
-            Toast.makeText(this, "First enable RIDER Swipe Control in Accessibility Settings", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "First enable RIDER in Accessibility Settings", Toast.LENGTH_LONG).show()
             openAccessibilitySettings()
+            return
+        }
+
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "Microphone permission required", Toast.LENGTH_LONG).show()
+            requestRequiredPermissions()
             return
         }
 
@@ -583,7 +629,7 @@ class MainActivity : Activity() {
             isListeningServiceActive = false
             micStatusText.text = "Background Voice: Disabled"
             micToggleButton.text = "START\nLISTENING"
-            micToggleButton.background = createRoundedDrawable("#1E293B", "#334155", 170f)
+            micToggleButton.background = createRoundedDrawable("#1E293B", "#334155", 160f)
             micToggleButton.setTextColor(Color.WHITE)
             Toast.makeText(this, "Voice wake-word paused", Toast.LENGTH_SHORT).show()
         } else {
@@ -591,7 +637,7 @@ class MainActivity : Activity() {
             isListeningServiceActive = true
             micStatusText.text = "Listening for '$selectedAssistant' in background..."
             micToggleButton.text = "LISTENING\nACTIVE"
-            micToggleButton.background = createRoundedDrawable("#0284C7", "#38BDF8", 170f)
+            micToggleButton.background = createRoundedDrawable("#0284C7", "#38BDF8", 160f)
             micToggleButton.setTextColor(Color.WHITE)
             Toast.makeText(this, "Listening for '$selectedAssistant' in background", Toast.LENGTH_SHORT).show()
         }
@@ -634,12 +680,16 @@ class MainActivity : Activity() {
     }
 
     private fun refreshBluetoothData() {
-        val st = bluetoothHelper.getEarbudsState()
-        if (st.connected) {
-            earbudsState = st
-        }
-        if (currentTab == "bluetooth") {
-            renderBluetoothContent()
+        try {
+            val st = bluetoothHelper.getEarbudsState()
+            if (st.connected) {
+                earbudsState = st
+            }
+            if (currentTab == "bluetooth") {
+                renderBluetoothContent()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to refresh bluetooth data: ${e.message}")
         }
     }
 
@@ -663,5 +713,10 @@ class MainActivity : Activity() {
             setStroke(3, Color.parseColor(strokeHex))
             this.cornerRadius = cornerRadius
         }
+    }
+
+    companion object {
+        private const val TAG = "MainActivity"
+        private const val PERMISSION_REQUEST_CODE = 1001
     }
 }

@@ -1,5 +1,6 @@
 package com.rider.assistant
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,6 +8,8 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
@@ -33,16 +36,34 @@ class VoiceWakeWordService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         wakeWord = intent?.getStringExtra(EXTRA_WAKE_WORD) ?: "RIDER"
 
-        val notification = buildForegroundNotification("Listening for '$wakeWord' in background...")
-        startForeground(NOTIFICATION_ID, notification)
+        try {
+            val notification = buildForegroundNotification("Listening for '$wakeWord' in background...")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start foreground notification: ${e.message}")
+        }
 
-        startContinuousListening()
+        // Only start listening if microphone permission is granted
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            startContinuousListening()
+        } else {
+            Log.w(TAG, "Cannot start listening: RECORD_AUDIO permission not granted")
+        }
+
         return START_STICKY
     }
 
     private fun startContinuousListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            Log.e(TAG, "Speech recognition unavailable")
+            Log.e(TAG, "Speech recognition unavailable on this device")
             return
         }
 
@@ -50,54 +71,62 @@ class VoiceWakeWordService : Service() {
             speechRecognizer?.destroy()
         } catch (_: Exception) {}
 
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
-            setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) {
-                    isListening = true
-                    Log.d(TAG, "Ready for speech")
-                }
+        try {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
+                setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: Bundle?) {
+                        isListening = true
+                        Log.d(TAG, "Ready for speech")
+                    }
 
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {
-                    isListening = false
-                }
+                    override fun onBeginningOfSpeech() {}
+                    override fun onRmsChanged(rmsdB: Float) {}
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+                    override fun onEndOfSpeech() {
+                        isListening = false
+                    }
 
-                override fun onError(error: Int) {
-                    isListening = false
-                    Log.d(TAG, "Speech error code: $error. Restarting listener...")
-                    // Restart after slight pause to prevent spin-loop
-                    android.os.Handler(mainLooper).postDelayed({
-                        startListeningIntent()
-                    }, 800)
-                }
+                    override fun onError(error: Int) {
+                        isListening = false
+                        Log.d(TAG, "Speech error code: $error. Scheduling restart...")
+                        // Avoid aggressive loop on error
+                        android.os.Handler(mainLooper).postDelayed({
+                            startListeningIntent()
+                        }, 1200)
+                    }
 
-                override fun onResults(results: Bundle?) {
-                    isListening = false
-                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    handleRecognizedText(matches)
+                    override fun onResults(results: Bundle?) {
+                        isListening = false
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        handleRecognizedText(matches)
 
-                    // Restart listening for continuous wake-word detection
-                    android.os.Handler(mainLooper).postDelayed({
-                        startListeningIntent()
-                    }, 400)
-                }
+                        // Restart continuous listening
+                        android.os.Handler(mainLooper).postDelayed({
+                            startListeningIntent()
+                        }, 500)
+                    }
 
-                override fun onPartialResults(partialResults: Bundle?) {
-                    val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    handleRecognizedText(matches)
-                }
+                    override fun onPartialResults(partialResults: Bundle?) {
+                        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        handleRecognizedText(matches)
+                    }
 
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-            })
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
+                })
+            }
+
+            startListeningIntent()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error initializing speech recognizer: ${e.message}")
         }
-
-        startListeningIntent()
     }
 
     private fun startListeningIntent() {
         if (speechRecognizer == null) return
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            Log.w(TAG, "Cannot listen: missing RECORD_AUDIO permission")
+            return
+        }
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -118,7 +147,7 @@ class VoiceWakeWordService : Service() {
 
         for (text in matches) {
             val lower = text.lowercase(Locale.ROOT)
-            Log.d(TAG, "Heard: $lower (Target: $wakeWord)")
+            Log.d(TAG, "Heard phrase: $lower (Target: $wakeWord)")
 
             val target = wakeWord.lowercase(Locale.ROOT)
             val matched = when (target) {
@@ -130,7 +159,7 @@ class VoiceWakeWordService : Service() {
             if (matched) {
                 triggerHapticFeedback()
                 val success = RiderAccessibilityService.instance?.swipeUp() ?: false
-                Log.d(TAG, "Wake word matched! Swiping up, result: $success")
+                Log.d(TAG, "Wake word triggered swipeUp: $success")
                 break
             }
         }
@@ -151,15 +180,19 @@ class VoiceWakeWordService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Rider Assistant Background Voice",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Keeps voice wake-word active in the background"
+            try {
+                val channel = NotificationChannel(
+                    CHANNEL_ID,
+                    "Rider Assistant Background Voice",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Keeps voice wake-word active in the background"
+                }
+                val manager = getSystemService(NotificationManager::class.java)
+                manager?.createNotificationChannel(channel)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create notification channel: ${e.message}")
             }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
         }
     }
 
@@ -181,7 +214,7 @@ class VoiceWakeWordService : Service() {
         return builder
             .setContentTitle("Rider Assistant")
             .setContentText(contentText)
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setSmallIcon(R.drawable.ic_launcher)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
@@ -205,19 +238,25 @@ class VoiceWakeWordService : Service() {
         const val EXTRA_WAKE_WORD = "extra_wake_word"
 
         fun start(context: Context, wakeWord: String = "RIDER") {
-            val intent = Intent(context, VoiceWakeWordService::class.java).apply {
-                putExtra(EXTRA_WAKE_WORD, wakeWord)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                val intent = Intent(context, VoiceWakeWordService::class.java).apply {
+                    putExtra(EXTRA_WAKE_WORD, wakeWord)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error starting VoiceWakeWordService: ${e.message}")
             }
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, VoiceWakeWordService::class.java)
-            context.stopService(intent)
+            try {
+                val intent = Intent(context, VoiceWakeWordService::class.java)
+                context.stopService(intent)
+            } catch (_: Exception) {}
         }
     }
 }

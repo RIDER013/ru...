@@ -334,13 +334,20 @@ export default function App() {
 
       {/* TOP STATUS BAR */}
       <header className="w-full px-6 pt-5 pb-3 flex items-center justify-between border-b border-slate-800/60 bg-[#0b0f19]/80 backdrop-blur-md sticky top-0 z-30">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-cyan-200 tracking-wider">
-            RIDER ASSISTANT
-          </h1>
-          <p className="text-[11px] text-slate-400 tracking-wide font-medium">
-            {activeTab === 'home' ? 'WAKE-WORD SWIPE DASHBOARD' : 'BLUETOOTH EARBUDS DASHBOARD'}
-          </p>
+        <div className="flex items-center space-x-3">
+          <img
+            src="/assets/aistudio/image_644c82ae.png"
+            alt="Rider Assistant"
+            className="w-10 h-10 rounded-xl object-cover border border-sky-400/40 shadow-[0_0_12px_rgba(56,189,248,0.3)]"
+          />
+          <div>
+            <h1 className="text-xl sm:text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-cyan-200 tracking-wider">
+              RIDER ASSISTANT
+            </h1>
+            <p className="text-[11px] text-slate-400 tracking-wide font-medium">
+              {activeTab === 'home' ? 'WAKE-WORD SWIPE DASHBOARD' : 'BLUETOOTH EARBUDS DASHBOARD'}
+            </p>
+          </div>
         </div>
 
         {/* Status badges */}
