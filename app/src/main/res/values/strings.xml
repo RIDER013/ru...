@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Rider Assistant</string>
+    <string name="accessibility_service_name">Rider Assistant Swipe Control</string>
+    <string name="accessibility_description">Allows Rider Assistant to perform hands-free upward swipe gestures when you say Rider or Buddy, even while other apps are active or running in the background.</string>
+</resources>
