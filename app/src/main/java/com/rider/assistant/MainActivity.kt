@@ -6,6 +6,10 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -16,10 +20,16 @@ import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private var selectedAssistant = "VARTI" // "VARTI", "RIDER", "BUDDY"
+    private var proximitySensorEnabled = true
     private var currentTab = "home"
+
+    // Proximity Sensor
+    private var sensorManager: SensorManager? = null
+    private var proximitySensor: Sensor? = null
+    private var lastProximityTriggerTime = 0L
 
     // UI Structure
     private lateinit var mainLayout: LinearLayout
@@ -32,6 +42,8 @@ class MainActivity : AppCompatActivity() {
     // Home Interactive Components
     private lateinit var playStartBtn: Button
     private lateinit var toggleWakeWordBtn: Button
+    private lateinit var wakeWordIndicator: TextView
+    private lateinit var proximityToggleBtn: Button
     private lateinit var testSwipeBtn: Button
     private lateinit var accessibilityStatusBadge: TextView
 
@@ -41,7 +53,7 @@ class MainActivity : AppCompatActivity() {
 
     // Bluetooth Helper
     private val bluetoothHelper by lazy { BluetoothHelper(this) }
-    private var earbudsState: EarbudsState = EarbudsState(false, "", 0, 0, 0, "")
+    private var earbudsState: EarbudsState = EarbudsState(false, "", -1, -1, -1, "")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -55,6 +67,10 @@ class MainActivity : AppCompatActivity() {
             requestRequiredPermissions()
             updateAccessibilityBadge()
             refreshBluetoothData()
+
+            // Initialize SensorManager and Proximity Sensor
+            sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+            proximitySensor = sensorManager?.getDefaultSensor(Sensor.TYPE_PROXIMITY)
         } catch (e: Exception) {
             Log.e(TAG, "Error in onCreate: ${e.message}", e)
         }
@@ -65,10 +81,40 @@ class MainActivity : AppCompatActivity() {
         try {
             updateAccessibilityBadge()
             refreshBluetoothData()
+
+            // Register proximity sensor listener
+            if (proximitySensor != null && proximitySensorEnabled) {
+                sensorManager?.registerListener(this, proximitySensor, SensorManager.SENSOR_DELAY_UI)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error in onResume: ${e.message}", e)
         }
     }
+
+    override fun onPause() {
+        super.onPause()
+        try {
+            sensorManager?.unregisterListener(this)
+        } catch (_: Exception) {}
+    }
+
+    override fun onSensorChanged(event: SensorEvent?) {
+        if (!proximitySensorEnabled || event == null) return
+        if (event.sensor.type == Sensor.TYPE_PROXIMITY) {
+            val distance = event.values[0]
+            val maxRange = proximitySensor?.maximumRange ?: 5f
+            if (distance < maxRange || distance <= 3f) {
+                val now = System.currentTimeMillis()
+                if (now - lastProximityTriggerTime > 650) {
+                    lastProximityTriggerTime = now
+                    Log.d(TAG, "MainActivity Proximity wave detected! Triggering center swipe...")
+                    triggerManualSwipe()
+                }
+            }
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
     private fun requestRequiredPermissions() {
         try {
@@ -207,45 +253,75 @@ class MainActivity : AppCompatActivity() {
     private fun buildHomeLayout(): LinearLayout {
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(40, 20, 40, 20)
-            gravity = Gravity.CENTER
+            setPadding(36, 16, 36, 20)
+            gravity = Gravity.CENTER_HORIZONTAL
         }
 
-        // Small Round Play Start Button (Turns on Voice + Wave Proximity Sensor)
+        // Wake-word indicator badge at top of home
+        wakeWordIndicator = TextView(this).apply {
+            textSize = 12f
+            setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(20, 10, 20, 10)
+            background = createRoundedDrawable("#101827", "#38BDF8", 16f)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = 24
+            }
+        }
+        layout.addView(wakeWordIndicator)
+        updateWakeWordIndicator()
+
+        // Small Round Play Start Button
         playStartBtn = Button(this).apply {
             text = "▶"
-            textSize = 28f
+            textSize = 26f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#020617"))
-            background = createRoundedDrawable("#38BDF8", "#7DD3FC", 120f)
-            layoutParams = LinearLayout.LayoutParams(220, 220).apply {
+            background = createRoundedDrawable("#38BDF8", "#7DD3FC", 100f)
+            layoutParams = LinearLayout.LayoutParams(180, 180).apply {
                 gravity = Gravity.CENTER
-                topMargin = 40
-                bottomMargin = 48
+                bottomMargin = 24
             }
             setOnClickListener { handleLetsStart() }
         }
         layout.addView(playStartBtn)
 
-        // Single Combined Button for "Say Varti" / "Say Rider" / "Say Buddy"
+        // Single Combined Button for Wake Word Toggle
         toggleWakeWordBtn = Button(this).apply {
-            textSize = 14f
+            textSize = 13f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.WHITE)
-            background = createRoundedDrawable("#101827", "#38BDF8", 20f)
+            background = createRoundedDrawable("#101827", "#38BDF8", 18f)
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
-                bottomMargin = 16
+                bottomMargin = 14
             }
-            setPadding(32, 28, 32, 28)
-            setOnClickListener {
-                toggleWakeWord()
-            }
+            setPadding(28, 24, 28, 24)
+            setOnClickListener { toggleWakeWord() }
         }
         layout.addView(toggleWakeWordBtn)
         updateWakeWordButtonText()
+
+        // Proximity Sensor Toggle Switch
+        proximityToggleBtn = Button(this).apply {
+            textSize = 12f
+            setTypeface(null, Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = 14
+            }
+            setPadding(24, 20, 24, 20)
+            setOnClickListener { toggleProximitySensor() }
+        }
+        layout.addView(proximityToggleBtn)
+        updateProximityButtonState()
 
         // Simple Test Swipe Trigger
         testSwipeBtn = Button(this).apply {
@@ -258,7 +334,7 @@ class MainActivity : AppCompatActivity() {
             ).apply {
                 gravity = Gravity.CENTER
             }
-            setPadding(32, 16, 32, 16)
+            setPadding(28, 14, 28, 14)
             setOnClickListener { triggerManualSwipe() }
         }
         layout.addView(testSwipeBtn)
@@ -280,11 +356,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // Start background service (voice wake-word + wave proximity sensor + earbud media click listener)
         VoiceWakeWordService.start(this, selectedAssistant)
-        Toast.makeText(this, "RIDER Active! Say \"$selectedAssistant\" or wave hand near top sensor to swipe.", Toast.LENGTH_LONG).show()
-
-        // Move to background
+        Toast.makeText(this, "RIDER Active! Say \"$selectedAssistant\" or wave hand near sensor.", Toast.LENGTH_LONG).show()
         moveTaskToBack(true)
     }
 
@@ -294,6 +367,7 @@ class MainActivity : AppCompatActivity() {
             "RIDER" -> "BUDDY"
             else -> "VARTI"
         }
+        updateWakeWordIndicator()
         updateWakeWordButtonText()
         updateTestButtonText()
         Toast.makeText(this, "Switched to Say $selectedAssistant", Toast.LENGTH_SHORT).show()
@@ -301,6 +375,27 @@ class MainActivity : AppCompatActivity() {
         if (VoiceWakeWordService.isServiceRunning) {
             VoiceWakeWordService.start(this, selectedAssistant)
         }
+    }
+
+    private fun toggleProximitySensor() {
+        proximitySensorEnabled = !proximitySensorEnabled
+        VoiceWakeWordService.isProximityEnabled = proximitySensorEnabled
+        updateProximityButtonState()
+        
+        if (proximitySensorEnabled && proximitySensor != null) {
+            sensorManager?.registerListener(this, proximitySensor, SensorManager.SENSOR_DELAY_UI)
+        } else {
+            sensorManager?.unregisterListener(this)
+        }
+
+        val status = if (proximitySensorEnabled) "Enabled" else "Disabled"
+        Toast.makeText(this, "Proximity Sensor $status", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun updateWakeWordIndicator() {
+        val display = if (selectedAssistant == "VARTI") "Varti (वरती)" else selectedAssistant
+        wakeWordIndicator.text = "Active Wake-Word: $display"
+        wakeWordIndicator.setTextColor(Color.parseColor("#38BDF8"))
     }
 
     private fun updateWakeWordButtonText() {
@@ -311,6 +406,20 @@ class MainActivity : AppCompatActivity() {
         }
         val display = if (selectedAssistant == "VARTI") "Varti (वरती)" else selectedAssistant
         toggleWakeWordBtn.text = "Say $display  (Tap for $nextOption)"
+    }
+
+    private fun updateProximityButtonState() {
+        if (proximitySensorEnabled) {
+            proximityToggleBtn.text = "Proximity Sensor: ON (Tap to Disable)"
+            proximityToggleBtn.setBackgroundColor(Color.parseColor("#064E3B"))
+            proximityToggleBtn.setTextColor(Color.parseColor("#34D399"))
+            proximityToggleBtn.background = createRoundedDrawable("#064E3B", "#059669", 18f)
+        } else {
+            proximityToggleBtn.text = "Proximity Sensor: OFF (Tap to Enable)"
+            proximityToggleBtn.setBackgroundColor(Color.parseColor("#78350F"))
+            proximityToggleBtn.setTextColor(Color.parseColor("#FBBF24"))
+            proximityToggleBtn.background = createRoundedDrawable("#78350F", "#D97706", 18f)
+        }
     }
 
     private fun updateTestButtonText() {
@@ -330,112 +439,73 @@ class MainActivity : AppCompatActivity() {
     private fun renderBluetoothContent(container: LinearLayout = bluetoothStatusLayout) {
         container.removeAllViews()
 
-        if (!earbudsState.connected) {
-            // Real life: No earbuds connected
-            val notConnectedCard = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                setPadding(32, 60, 32, 60)
-            }
-
-            val caseIcon = TextView(this).apply {
-                text = "🔋\n[CASE]"
-                textSize = 34f
-                gravity = Gravity.CENTER
-                setTextColor(Color.parseColor("#64748B"))
-                setPadding(32, 32, 32, 32)
-                background = createRoundedDrawable("#101827", "#1E293B", 24f)
-            }
-            notConnectedCard.addView(caseIcon)
-
-            val noConnText = TextView(this).apply {
-                text = "No Earbuds Connected"
-                textSize = 15f
-                setTextColor(Color.parseColor("#94A3B8"))
-                setTypeface(null, Typeface.BOLD)
-                setPadding(0, 24, 0, 8)
-                gravity = Gravity.CENTER
-            }
-            notConnectedCard.addView(noConnText)
-
-            val refreshBtn = Button(this).apply {
-                text = "Scan Connected Earbuds"
-                textSize = 12f
-                setTextColor(Color.WHITE)
-                background = createRoundedDrawable("#0284C7", "#38BDF8", 14f)
-                setPadding(32, 16, 32, 16)
-                setOnClickListener {
-                    refreshBluetoothData()
-                    Toast.makeText(this@MainActivity, "Scanning for connected earbuds...", Toast.LENGTH_SHORT).show()
-                }
-            }
-            notConnectedCard.addView(refreshBtn)
-
-            container.addView(notConnectedCard)
-            return
-        }
-
-        // When connected: Show Real Device Name and Charging levels ONLY
+        // Device Title
         val devTitle = TextView(this).apply {
-            text = earbudsState.name
-            textSize = 18f
+            text = if (earbudsState.connected) earbudsState.name else "Rider AirBuds Pro"
+            textSize = 16f
             setTextColor(Color.WHITE)
             setTypeface(null, Typeface.BOLD)
             gravity = Gravity.CENTER
-            setPadding(0, 16, 0, 24)
+            setPadding(0, 4, 0, 2)
         }
         container.addView(devTitle)
 
-        // Earbuds Touch Sensors Row (Clicking any sensor triggers swipe up!)
+        val devSub = TextView(this).apply {
+            text = if (earbudsState.connected) "Connected • Touch Sensors Active" else "Not Connected"
+            textSize = 10f
+            setTextColor(Color.parseColor("#38BDF8"))
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 16)
+        }
+        container.addView(devSub)
+
         val earbudsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
-                bottomMargin = 24
+                bottomMargin = 16
             }
         }
 
-        // Left Earbud Sensor Card
-        val leftBatStr = if (earbudsState.leftBattery >= 0) "${earbudsState.leftBattery}%" else "N/A"
-        val leftCard = createEarbudSensorCard("LEFT (L)", "🎧", leftBatStr) {
+        // 1. LEFT CARD
+        val leftCard = createEarbudCard("LEFT", "Sensor Active", "N/A") {
             triggerManualSwipe()
-            Toast.makeText(this@MainActivity, "Left Earbud: Swiped Up!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this@MainActivity, "LEFT Earbud Sensor: Swiped Up!", Toast.LENGTH_SHORT).show()
         }
         earbudsRow.addView(leftCard)
 
-        // Case Card
-        val caseBatStr = if (earbudsState.caseBattery >= 0) "${earbudsState.caseBattery}%" else "N/A"
-        val caseCard = createEarbudCaseCard("CASE", "🔋", caseBatStr)
+        // 2. CASE CARD
+        val caseCard = createEarbudCard("CASE", "Charging Case", if (earbudsState.caseBattery >= 0) "${earbudsState.caseBattery}%" else "N/A") {
+            Toast.makeText(this@MainActivity, "Charging Case Connected", Toast.LENGTH_SHORT).show()
+        }
         earbudsRow.addView(caseCard)
 
-        // Right Earbud Sensor Card
-        val rightBatStr = if (earbudsState.rightBattery >= 0) "${earbudsState.rightBattery}%" else "N/A"
-        val rightCard = createEarbudSensorCard("RIGHT (R)", "🎧", rightBatStr) {
+        // 3. RIGHT CARD
+        val rightCard = createEarbudCard("RIGHT", "Sensor Active", "N/A") {
             triggerManualSwipe()
-            Toast.makeText(this@MainActivity, "Right Earbud: Swiped Up!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this@MainActivity, "RIGHT Earbud Sensor: Swiped Up!", Toast.LENGTH_SHORT).show()
         }
         earbudsRow.addView(rightCard)
 
         container.addView(earbudsRow)
 
-        // Simple Refresh Button
         val refreshBtn = Button(this).apply {
-            text = "Refresh Battery"
+            text = "Refresh Earbuds Status"
             textSize = 11f
             setTextColor(Color.parseColor("#38BDF8"))
             background = createRoundedDrawable("#1E293B", "#38BDF8", 12f)
             setPadding(28, 14, 28, 14)
             setOnClickListener {
                 refreshBluetoothData()
-                Toast.makeText(this@MainActivity, "Battery refreshed", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "Status refreshed", Toast.LENGTH_SHORT).show()
             }
         }
         container.addView(refreshBtn)
     }
 
-    private fun createEarbudSensorCard(label: String, iconStr: String, batteryStr: String, onClickSensor: () -> Unit): LinearLayout {
+    private fun createEarbudCard(label: String, sensorStatus: String, batteryStr: String, onClickCard: (() -> Unit)? = null): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -445,21 +515,25 @@ class MainActivity : AppCompatActivity() {
                 marginStart = 4
                 marginEnd = 4
             }
+            if (onClickCard != null) {
+                setOnClickListener { onClickCard() }
+            }
 
             val lbl = TextView(this@MainActivity).apply {
                 text = label
-                textSize = 9f
+                textSize = 10f
                 setTextColor(Color.parseColor("#38BDF8"))
                 setTypeface(null, Typeface.BOLD)
                 gravity = Gravity.CENTER
             }
             addView(lbl)
 
-            val sensorBtn = Button(this@MainActivity).apply {
-                text = "Sensor"
+            val sensorBadge = TextView(this@MainActivity).apply {
+                text = sensorStatus
                 textSize = 9f
-                setTextColor(Color.WHITE)
-                background = createRoundedDrawable("#0284C7", "#38BDF8", 10f)
+                setTextColor(Color.parseColor("#34D399"))
+                background = createRoundedDrawable("#064E3B", "#059669", 10f)
+                gravity = Gravity.CENTER
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
@@ -467,55 +541,14 @@ class MainActivity : AppCompatActivity() {
                     topMargin = 8
                     bottomMargin = 8
                 }
-                setPadding(16, 8, 16, 8)
-                setOnClickListener { onClickSensor() }
+                setPadding(12, 6, 12, 6)
             }
-            addView(sensorBtn)
+            addView(sensorBadge)
 
             val bat = TextView(this@MainActivity).apply {
-                text = batteryStr
-                textSize = 14f
-                setTextColor(Color.WHITE)
-                setTypeface(null, Typeface.BOLD)
-                gravity = Gravity.CENTER
-            }
-            addView(bat)
-        }
-    }
-
-    private fun createEarbudCaseCard(label: String, iconStr: String, batteryStr: String): LinearLayout {
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(8, 16, 8, 16)
-            background = createRoundedDrawable("#101827", "#1E293B", 16f)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = 4
-                marginEnd = 4
-            }
-
-            val lbl = TextView(this@MainActivity).apply {
-                text = label
-                textSize = 9f
+                text = "Battery: $batteryStr"
+                textSize = 10f
                 setTextColor(Color.parseColor("#94A3B8"))
-                setTypeface(null, Typeface.BOLD)
-                gravity = Gravity.CENTER
-            }
-            addView(lbl)
-
-            val icon = TextView(this@MainActivity).apply {
-                text = iconStr
-                textSize = 22f
-                gravity = Gravity.CENTER
-                setPadding(0, 10, 0, 10)
-            }
-            addView(icon)
-
-            val bat = TextView(this@MainActivity).apply {
-                text = batteryStr
-                textSize = 14f
-                setTextColor(Color.WHITE)
-                setTypeface(null, Typeface.BOLD)
                 gravity = Gravity.CENTER
             }
             addView(bat)

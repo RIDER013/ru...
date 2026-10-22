@@ -26,11 +26,14 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
 import android.view.KeyEvent
+import ai.picovoice.porcupine.PorcupineManager
+import ai.picovoice.porcupine.PorcupineManagerCallback
 import java.util.Locale
 
 class VoiceWakeWordService : Service() {
 
     private var speechRecognizer: SpeechRecognizer? = null
+    private var porcupineManager: PorcupineManager? = null
     private var isListening = false
     private var wakeWord = "RIDER"
 
@@ -49,6 +52,23 @@ class VoiceWakeWordService : Service() {
 
         initProximitySensor()
         initMediaSessionForEarbuds()
+        initPorcupine()
+    }
+
+    private fun initPorcupine() {
+        try {
+            porcupineManager = PorcupineManager.Builder()
+                .setKeyword(ai.picovoice.porcupine.Porcupine.BuiltInKeyword.RIDER)
+                .build(applicationContext, PorcupineManagerCallback { keywordIndex ->
+                    Log.d(TAG, "Porcupine wake-word 'rider' detected at index $keywordIndex! Swiping up...")
+                    triggerHapticFeedback()
+                    RiderAccessibilityService.instance?.swipeUp()
+                })
+            porcupineManager?.start()
+            Log.d(TAG, "PorcupineManager initialized and started successfully for 'rider'")
+        } catch (e: Exception) {
+            Log.e(TAG, "Porcupine initialization fallback (requires Picovoice access key for commercial custom keyword): ${e.message}")
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -94,7 +114,7 @@ class VoiceWakeWordService : Service() {
                         val max = proximitySensor?.maximumRange ?: 5f
 
                         // Finger/hand is close to phone top sensor
-                        if (distance < max || distance <= 3f) {
+                        if (isProximityEnabled && (distance < max || distance <= 3f)) {
                             val now = System.currentTimeMillis()
                             if (now - lastTriggerTime > 650) {
                                 lastTriggerTime = now
@@ -315,6 +335,11 @@ class VoiceWakeWordService : Service() {
         speechRecognizer = null
 
         try {
+            porcupineManager?.delete()
+        } catch (_: Exception) {}
+        porcupineManager = null
+
+        try {
             proximityListener?.let { sensorManager?.unregisterListener(it) }
         } catch (_: Exception) {}
 
@@ -336,6 +361,9 @@ class VoiceWakeWordService : Service() {
         @Volatile
         var isServiceRunning: Boolean = false
             private set
+
+        @Volatile
+        var isProximityEnabled: Boolean = true
 
         fun start(context: Context, wakeWord: String = "RIDER") {
             try {

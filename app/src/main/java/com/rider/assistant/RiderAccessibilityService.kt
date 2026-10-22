@@ -5,6 +5,7 @@ import android.accessibilityservice.GestureDescription
 import android.graphics.Path
 import android.os.Build
 import android.util.Log
+import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 
 class RiderAccessibilityService : AccessibilityService() {
@@ -15,6 +16,22 @@ class RiderAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() {
         Log.d(TAG, "RiderAccessibilityService interrupted")
+    }
+
+    /**
+     * Intercepts Bluetooth earbud touch sensor taps (Media keys like Play/Pause, Headset Hook)
+     * system-wide at Accessibility Service level to trigger instant upward swipe.
+     */
+    override fun onKeyEvent(event: KeyEvent?): Boolean {
+        if (event != null && event.action == KeyEvent.ACTION_DOWN) {
+            val keyCode = event.keyCode
+            Log.d(TAG, "AccessibilityService intercepted key event: $keyCode. Triggering swipeUp()...")
+            val success = swipeUp()
+            if (success) {
+                return true
+            }
+        }
+        return super.onKeyEvent(event)
     }
 
     /**
