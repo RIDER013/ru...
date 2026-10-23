@@ -17,6 +17,7 @@ import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.provider.Settings
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -40,6 +41,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     // UI elements
     private lateinit var mainLayout: LinearLayout
     private lateinit var txtBluetoothIcon: TextView
+    private lateinit var btnAccessibilityPermission: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,6 +68,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         super.onResume()
         try {
             refreshBluetoothStatus()
+            updateAccessibilityButtonUi()
             if (proximitySensor != null && proxymityOn) {
                 sensorManager?.registerListener(this, proximitySensor, SensorManager.SENSOR_DELAY_UI)
             }
@@ -141,9 +144,49 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        return RiderAccessibilityService.isServiceRunning
+    }
+
+    private fun openAccessibilitySettings() {
+        try {
+            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            startActivity(intent)
+            Toast.makeText(this, "Enable 'Rider Assistant' Service", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Settings error: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun updateAccessibilityButtonUi() {
+        if (!::btnAccessibilityPermission.isInitialized) return
+        val enabled = isAccessibilityServiceEnabled()
+        btnAccessibilityPermission.apply {
+            removeAllViews()
+            background = createRoundedDrawable(
+                if (enabled) "#064E3B" else "#451A03",
+                if (enabled) "#10B981" else "#F59E0B",
+                20f
+            )
+            val dot = TextView(this@MainActivity).apply {
+                text = "● "
+                textSize = 9f
+                setTextColor(if (enabled) Color.parseColor("#34D399") else Color.parseColor("#FBBF24"))
+            }
+            val label = TextView(this@MainActivity).apply {
+                text = if (enabled) "ACC ON" else "ACC OFF"
+                textSize = 10f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.WHITE)
+            }
+            addView(dot)
+            addView(label)
+        }
+    }
+
     /**
      * Exact UI specified by the user:
-     * - Top: ƦƗƉƐƦ Title + Top Right [Ʀ] in Pink + Bluetooth Icon below it
+     * - Top: ƦƗƉƐƦ Title + Accessibility Permission button to the left of [Ʀ] in Pink + Bluetooth Icon below Ʀ
      * - Center: START button
      * - Bottom: TEST button + "created by ƦƗƉƐƦ"
      */
@@ -158,7 +201,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             setPadding(40, 50, 40, 30)
         }
 
-        // 1. TOP HEADER: ƦƗƉƐƦ and Top Right Ʀ (pink) + Bluetooth Icon below it
+        // 1. TOP HEADER: ƦƗƉƐƦ and Accessibility Button to the left of Ʀ (pink) + Bluetooth Icon below Ʀ
         val headerLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
@@ -177,6 +220,22 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
         headerLayout.addView(titleText)
+
+        // Accessibility Permission button to the left side of Ʀ
+        btnAccessibilityPermission = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(18, 10, 18, 10)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                marginEnd = 24
+            }
+            setOnClickListener { openAccessibilitySettings() }
+        }
+        updateAccessibilityButtonUi()
+        headerLayout.addView(btnAccessibilityPermission)
 
         // Top right layout: Ʀ (pink) and bluetooth icon below it
         val topRightLayout = LinearLayout(this).apply {

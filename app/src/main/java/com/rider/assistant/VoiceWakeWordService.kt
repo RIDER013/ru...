@@ -27,6 +27,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -41,7 +42,7 @@ import kotlin.math.sqrt
 /**
  * ==============================================================================
  * VoiceWakeWordService:
- * 1. Voice Recording (AudioRecord & System Mic)
+ * 1. Continuous Voice Recording (AudioRecord & System Mic) with Watchdog & WakeLock
  * 2. Speech Recognition (android.speech.SpeechRecognizer)
  * 3. Voice Command Processing (processVoiceCommand -> swipeUp())
  * 4. Proximity Sensor & Bluetooth Earbud MediaSession
@@ -52,11 +53,27 @@ class VoiceWakeWordService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var wakeWord = "RIDER"
 
-    // 1. VOICE RECORDING (AudioRecord)
+    // CPU WakeLock: Prevents Android Doze / Screen-Off sleep from turning off the mic
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    // 1. VOICE RECORDING (AudioRecord) & CONTINUOUS WATCHDOG
     @Volatile
     private var isAudioRunning = false
     private var audioThread: Thread? = null
     private var audioRecord: AudioRecord? = null
+    @Volatile
+    private var lastAudioFrameTimestamp = 0L
+
+    // Watchdog Timer: Runs every 5s, restarts mic loop if stalled or interrupted
+    private val watchdogHandler = Handler(Looper.getMainLooper())
+    private val watchdogRunnable = object : Runnable {
+        override fun run() {
+            if (isServiceRunning && isVoiceEnabled) {
+                checkAndReviveAudioRecording()
+            }
+            watchdogHandler.postDelayed(this, 5000)
+        }
+    }
 
     // 2. SPEECH RECOGNITION (android.speech.SpeechRecognizer)
     private var speechRecognizer: SpeechRecognizer? = null
@@ -78,17 +95,32 @@ class VoiceWakeWordService : Service() {
         isServiceRunning = true
         createNotificationChannel()
 
+        // Acquire WakeLock so background mic stays continuously active even when screen is locked
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+            wakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "RiderAssistant:VoiceWakeLock")?.apply {
+                setReferenceCounted(false)
+                acquire(12 * 60 * 60 * 1000L) // 12 hours max safety
+            }
+            Log.d(TAG, "Acquired PARTIAL_WAKE_LOCK for continuous mic capture")
+        } catch (e: Exception) {
+            Log.e(TAG, "WakeLock error: ${e.message}")
+        }
+
         initProximitySensor()
         if (isBluetoothEnabled) {
             initMediaSessionForEarbuds()
         }
+
+        // Start continuous watchdog
+        watchdogHandler.postDelayed(watchdogRunnable, 5000)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         wakeWord = intent?.getStringExtra(EXTRA_WAKE_WORD) ?: "RIDER"
 
         try {
-            val notification = buildForegroundNotification("ƦƗƉƐƦ Active: Listening for '$wakeWord' / 'Next'...")
+            val notification = buildForegroundNotification("ƦƗƉƐƦ Active: Continuous mic listening for '$wakeWord' / 'Next'...")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(
                     NOTIFICATION_ID,
@@ -113,7 +145,7 @@ class VoiceWakeWordService : Service() {
     // 1. VOICE RECORDING & LOW-POWER AUDIO MONITORING (AudioRecord)
     // ==============================================================================
     @SuppressLint("MissingPermission")
-    private fun startVoiceRecordingAndDetection() {
+    private synchronized fun startVoiceRecordingAndDetection() {
         if (isAudioRunning || !isVoiceEnabled) return
         isAudioRunning = true
 
@@ -135,13 +167,14 @@ class VoiceWakeWordService : Service() {
                 )
 
                 if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-                    Log.e(TAG, "AudioRecord could not initialize. Using SpeechRecognizer directly.")
-                    mainHandler.post { startSpeechRecognitionEngine() }
+                    Log.e(TAG, "AudioRecord could not initialize. Will retry via watchdog.")
+                    isAudioRunning = false
                     return@Thread
                 }
 
                 audioRecord?.startRecording()
-                Log.d(TAG, "AudioRecord active: monitoring voice energy...")
+                lastAudioFrameTimestamp = System.currentTimeMillis()
+                Log.d(TAG, "AudioRecord active: continuous voice energy monitoring running...")
 
                 val frame = ShortArray(frameSamples)
                 var ambientBaseline = 150.0
@@ -156,7 +189,8 @@ class VoiceWakeWordService : Service() {
                     if (audioRecord?.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
                         try {
                             audioRecord?.startRecording()
-                        } catch (_: Exception) {
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to startRecording: ${e.message}")
                             Thread.sleep(100)
                             continue
                         }
@@ -167,6 +201,9 @@ class VoiceWakeWordService : Service() {
                         Thread.sleep(10)
                         continue
                     }
+
+                    // Update timestamp to confirm mic is actively capturing live audio frames
+                    lastAudioFrameTimestamp = System.currentTimeMillis()
 
                     // Calculate Frame Energy (RMS)
                     var sumSq = 0.0
@@ -200,12 +237,49 @@ class VoiceWakeWordService : Service() {
                     audioRecord?.release()
                 } catch (_: Exception) {}
                 audioRecord = null
+                isAudioRunning = false
             }
         }.apply {
             name = "RiderVoiceRecordingThread"
             priority = Thread.NORM_PRIORITY
             start()
         }
+    }
+
+    /**
+     * Continuous Watchdog: checks if the mic thread died or has stalled for > 8s,
+     * and automatically revives the audio recording loop so the mic NEVER turns off.
+     */
+    private fun checkAndReviveAudioRecording() {
+        val now = System.currentTimeMillis()
+        val isStalled = (lastAudioFrameTimestamp > 0 && (now - lastAudioFrameTimestamp > 8000))
+        val isDead = (audioThread == null || !audioThread!!.isAlive)
+
+        if ((isStalled || isDead) && !isSpeechRecognizing) {
+            Log.w(TAG, "Watchdog: Mic stalled or thread dead (stalled: $isStalled, dead: $isDead). Reviving mic immediately...")
+            restartVoiceRecording()
+        }
+    }
+
+    private synchronized fun restartVoiceRecording() {
+        isAudioRunning = false
+        try {
+            audioThread?.interrupt()
+        } catch (_: Exception) {}
+        audioThread = null
+
+        try {
+            audioRecord?.stop()
+            audioRecord?.release()
+        } catch (_: Exception) {}
+        audioRecord = null
+
+        lastAudioFrameTimestamp = System.currentTimeMillis()
+        mainHandler.postDelayed({
+            if (isServiceRunning && isVoiceEnabled) {
+                startVoiceRecordingAndDetection()
+            }
+        }, 300)
     }
 
     // ==============================================================================
@@ -236,7 +310,7 @@ class VoiceWakeWordService : Service() {
                     }
 
                     override fun onError(error: Int) {
-                        Log.d(TAG, "SpeechRecognizer error: $error")
+                        Log.d(TAG, "SpeechRecognizer error: $error. Resuming continuous mic...")
                         finishSpeechRecognition()
                     }
 
@@ -281,6 +355,19 @@ class VoiceWakeWordService : Service() {
             speechRecognizer?.destroy()
         } catch (_: Exception) {}
         speechRecognizer = null
+
+        // Immediately update timestamp & resume continuous mic recording
+        lastAudioFrameTimestamp = System.currentTimeMillis()
+        try {
+            if (audioRecord != null && audioRecord?.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                audioRecord?.startRecording()
+            } else if (audioRecord == null) {
+                restartVoiceRecording()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error re-activating audio record: ${e.message}. Restarting...")
+            restartVoiceRecording()
+        }
     }
 
     private fun handleSpeechResults(matches: List<String>?) {
@@ -382,16 +469,21 @@ class VoiceWakeWordService : Service() {
         try {
             audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
 
+            // Request AudioFocus so Bluetooth earbud media buttons are routed directly to Rider Assistant
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val focusRequest = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                val focusRequest = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                     .setAudioAttributes(
                         AudioAttributes.Builder()
                             .setUsage(AudioAttributes.USAGE_MEDIA)
                             .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                             .build()
                     )
+                    .setAcceptsDelayedFocusGain(true)
                     .build()
                 audioManager?.requestAudioFocus(focusRequest)
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager?.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
             }
 
             mediaSession = MediaSession(this, "RiderEarbudsActiveSession").apply {
@@ -399,12 +491,31 @@ class VoiceWakeWordService : Service() {
                 setPlaybackState(
                     PlaybackState.Builder()
                         .setState(PlaybackState.STATE_PLAYING, 0L, 1.0f)
-                        .setActions(PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_PLAY)
+                        .setActions(
+                            PlaybackState.ACTION_PLAY or
+                            PlaybackState.ACTION_PAUSE or
+                            PlaybackState.ACTION_PLAY_PAUSE or
+                            PlaybackState.ACTION_SKIP_TO_NEXT or
+                            PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+                            PlaybackState.ACTION_FAST_FORWARD or
+                            PlaybackState.ACTION_REWIND or
+                            PlaybackState.ACTION_STOP
+                        )
                         .build()
                 )
 
                 setCallback(object : MediaSession.Callback() {
                     private var lastEarbudClickTime = 0L
+
+                    private fun handleEarbudGesture(source: String) {
+                        val now = System.currentTimeMillis()
+                        if (now - lastEarbudClickTime > 400) {
+                            lastEarbudClickTime = now
+                            Log.d(TAG, "Bluetooth earbud touch triggered via $source! Swiping up...")
+                            triggerHapticFeedback()
+                            RiderAccessibilityService.instance?.swipeUp()
+                        }
+                    }
 
                     override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
                         val keyEvent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -415,20 +526,23 @@ class VoiceWakeWordService : Service() {
                         }
 
                         if (keyEvent?.action == KeyEvent.ACTION_DOWN) {
-                            val now = System.currentTimeMillis()
-                            if (now - lastEarbudClickTime > 1000) {
-                                lastEarbudClickTime = now
-                                Log.d(TAG, "Bluetooth earbud tap clicked! Swiping up...")
-                                triggerHapticFeedback()
-                                RiderAccessibilityService.instance?.swipeUp()
-                            }
+                            handleEarbudGesture("MediaButtonEvent key=${keyEvent.keyCode}")
                             return true
                         }
                         return super.onMediaButtonEvent(mediaButtonIntent)
                     }
+
+                    override fun onPlay() { handleEarbudGesture("onPlay") }
+                    override fun onPause() { handleEarbudGesture("onPause") }
+                    override fun onSkipToNext() { handleEarbudGesture("onSkipToNext") }
+                    override fun onSkipToPrevious() { handleEarbudGesture("onSkipToPrevious") }
+                    override fun onFastForward() { handleEarbudGesture("onFastForward") }
+                    override fun onRewind() { handleEarbudGesture("onRewind") }
+                    override fun onStop() { handleEarbudGesture("onStop") }
                 })
                 isActive = true
             }
+            Log.d(TAG, "Bluetooth Earbuds MediaSession initialized and active")
         } catch (e: Exception) {
             Log.e(TAG, "MediaSession setup error: ${e.message}")
         }
@@ -490,6 +604,20 @@ class VoiceWakeWordService : Service() {
     override fun onDestroy() {
         isServiceRunning = false
         isAudioRunning = false
+
+        // Stop watchdog
+        try {
+            watchdogHandler.removeCallbacks(watchdogRunnable)
+        } catch (_: Exception) {}
+
+        // Release WakeLock
+        try {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+                Log.d(TAG, "Released PARTIAL_WAKE_LOCK")
+            }
+        } catch (_: Exception) {}
+        wakeLock = null
 
         try {
             audioThread?.interrupt()

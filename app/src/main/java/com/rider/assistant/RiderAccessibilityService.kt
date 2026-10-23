@@ -27,16 +27,31 @@ class RiderAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Intercepts Bluetooth earbud touch sensor taps (Media keys like Play/Pause, Headset Hook)
+     * Intercepts Bluetooth earbud touch sensor taps (Media keys like Headset Hook, Play/Pause, Next, Skip)
      * system-wide at Accessibility Service level to trigger instant upward swipe.
      */
     override fun onKeyEvent(event: KeyEvent?): Boolean {
         if (event != null && event.action == KeyEvent.ACTION_DOWN) {
             val keyCode = event.keyCode
-            Log.d(TAG, "AccessibilityService intercepted key event: $keyCode. Triggering swipeUp()...")
-            val success = swipeUp()
-            if (success) {
-                return true
+            val isEarbudTouch = when (keyCode) {
+                KeyEvent.KEYCODE_HEADSETHOOK,
+                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                KeyEvent.KEYCODE_MEDIA_PLAY,
+                KeyEvent.KEYCODE_MEDIA_PAUSE,
+                KeyEvent.KEYCODE_MEDIA_NEXT,
+                KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+                KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+                KeyEvent.KEYCODE_MEDIA_REWIND,
+                KeyEvent.KEYCODE_MEDIA_STOP,
+                KeyEvent.KEYCODE_MEDIA_STEP,
+                KeyEvent.KEYCODE_VOICE_ASSIST,
+                KeyEvent.KEYCODE_CALL -> true
+                else -> false
+            }
+            if (isEarbudTouch) {
+                Log.d(TAG, "Bluetooth earbud touch sensor intercepted (KeyCode: $keyCode)! Triggering swipeUp()...")
+                swipeUp()
+                return true // Consumes the key event to avoid unwanted audio playback
             }
         }
         return super.onKeyEvent(event)

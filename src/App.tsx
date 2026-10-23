@@ -17,11 +17,17 @@ export default function App() {
   // Test Selection State
   const [showTestMenu, setShowTestMenu] = useState(false);
 
-  // Connectivity & Sensor Detection States
-  // Real check: Bluetooth is not connected by default unless connected
+  // Connectivity & Status
   const [isBluetoothConnected, setIsBluetoothConnected] = useState(false);
-  const [isSensorActive, setIsSensorActive] = useState(false);
-  const [voiceDetected, setVoiceDetected] = useState(false);
+
+  // Accessibility Permission State
+  const [isAccessibilityEnabled, setIsAccessibilityEnabled] = useState(false);
+
+  // Test screen specific sensor dot state:
+  // Starts FALSE (White dot, "not conectyvity" shown).
+  // Turns Sky Blue ONLY when user taps on the sensor dot below "conectyvity"!
+  // NOT automatically when bluetooth is connected!
+  const [isSensorDotActive, setIsSensorDotActive] = useState(false);
 
   // Toast for feedback
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -34,27 +40,10 @@ export default function App() {
   // Open Full-Screen Test for specific item
   const openTestScreen = (test: TestType) => {
     setActiveTest(test);
-    setIsSensorActive(false);
-    setVoiceDetected(false);
+    setIsSensorDotActive(false); // Initially white with "not conectyvity"
     setShowTestMenu(false);
     setCurrentScreen('test_screen');
   };
-
-  // Determine connectivity status for the active test
-  const getIsConnected = () => {
-    if (activeTest === 'blutooth') {
-      return isBluetoothConnected;
-    }
-    if (activeTest === 'proxymity') {
-      return isSensorActive;
-    }
-    if (activeTest === 'voice') {
-      return voiceDetected;
-    }
-    return false;
-  };
-
-  const isConnected = getIsConnected();
 
   return (
     <div className="min-h-screen w-full bg-[#080C14] text-white flex flex-col items-center justify-between font-sans selection:bg-pink-500/30 overflow-x-hidden">
@@ -76,32 +65,65 @@ export default function App() {
         {currentScreen === 'main' ? (
           <div className="flex-1 flex flex-col justify-between">
             
-            {/* TOP HEADER: ƦƗƉƐƦ Title + Top Right [Ʀ] in Pink + Bluetooth Icon below it */}
+            {/* TOP HEADER: ƦƗƉƐƦ Title + Top Right [Ʀ] in Pink with Accessibility Button to its left + Bluetooth Icon below Ʀ */}
             <div className="w-full flex items-start justify-between pt-2">
               {/* Title ƦƗƉƐƦ */}
               <h1 className="text-2xl font-black text-white tracking-widest select-none">
                 ƦƗƉƐƦ
               </h1>
 
-              {/* Top Right: Ʀ (Pink) & Bluetooth Icon below it */}
-              <div className="flex flex-col items-center space-y-2">
-                {/* Ʀ in Pink Color */}
-                <span className="text-2xl font-black text-[#FF2A85] select-none leading-none">
-                  Ʀ
-                </span>
-
-                {/* Bluetooth Icon below Ʀ: Display only (Colourful Sky Blue if connected, White if not) */}
-                <div
-                  className="p-1 select-none pointer-events-none"
-                  aria-label="Bluetooth Status"
+              {/* Right side container: Accessibility button on left + (Ʀ & Bluetooth) on right */}
+              <div className="flex items-center space-x-3">
+                {/* Accessibility Permission Button (placed to the left side of Ʀ) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !isAccessibilityEnabled;
+                    setIsAccessibilityEnabled(next);
+                    showToast(
+                      next
+                        ? 'Accessibility Permission Active (Enabled)'
+                        : 'Accessibility Permission Inactive'
+                    );
+                  }}
+                  className={`px-2.5 py-1 rounded-xl border text-[11px] font-bold flex items-center space-x-1.5 transition-all cursor-pointer shadow-sm hover:scale-102 active:scale-95 ${
+                    isAccessibilityEnabled
+                      ? 'bg-emerald-950/70 border-emerald-500 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.3)]'
+                      : 'bg-amber-950/50 border-amber-500/80 text-amber-300 hover:bg-amber-900/60'
+                  }`}
+                  title="Accessibility Permission (Click to toggle/test)"
+                  aria-label="Accessibility Permission"
                 >
-                  <Bluetooth
-                    className={`w-5 h-5 transition-colors ${
-                      isBluetoothConnected
-                        ? 'text-[#38BDF8] drop-shadow-[0_0_8px_#38BDF8]'
-                        : 'text-white opacity-90'
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      isAccessibilityEnabled
+                        ? 'bg-emerald-400 animate-pulse'
+                        : 'bg-amber-400'
                     }`}
                   />
+                  <span>{isAccessibilityEnabled ? 'ACC ON' : 'ACC OFF'}</span>
+                </button>
+
+                {/* Top Right: Ʀ (Pink) & Bluetooth Icon below it */}
+                <div className="flex flex-col items-center space-y-2">
+                  {/* Ʀ in Pink Color */}
+                  <span className="text-2xl font-black text-[#FF2A85] select-none leading-none">
+                    Ʀ
+                  </span>
+
+                  {/* Bluetooth Icon below Ʀ: Display only (Colourful Sky Blue if connected, White if not) */}
+                  <div
+                    className="p-1 select-none pointer-events-none"
+                    aria-label="Bluetooth Status"
+                  >
+                    <Bluetooth
+                      className={`w-5 h-5 transition-colors ${
+                        isBluetoothConnected
+                          ? 'text-[#38BDF8] drop-shadow-[0_0_8px_#38BDF8]'
+                          : 'text-white opacity-90'
+                      }`}
+                    />
+                  </div>
                 </div>
               </div>
             </div>
@@ -197,46 +219,44 @@ export default function App() {
 
             {/* Center Content:
                 conectyvity
-                dot (White -> Sky Blue when connected, else 'not conectyvity') */}
+                dot (White -> Sky Blue when tapped on sensor, NOT automatically on bluetooth connect)
+                not conectyvity */}
             <div className="flex-1 flex flex-col items-center justify-center space-y-7">
               
               {/* Connectivity section */}
-              <div
-                onClick={() => {
-                  if (activeTest === 'proxymity') {
-                    const next = !isSensorActive;
-                    setIsSensorActive(next);
-                    showToast(next ? 'Sensor Connected!' : 'Sensor Idle');
-                  } else if (activeTest === 'voice') {
-                    const next = !voiceDetected;
-                    setVoiceDetected(next);
-                    showToast(next ? 'Voice Heard!' : 'Voice Idle');
-                  } else if (activeTest === 'blutooth') {
-                    const next = !isBluetoothConnected;
-                    setIsBluetoothConnected(next);
-                    showToast(next ? 'Bluetooth Connected' : 'Bluetooth Disconnected');
-                  }
-                }}
-                className="flex flex-col items-center space-y-3 cursor-pointer select-none p-4 rounded-2xl hover:bg-slate-900/40 transition-colors"
-                title="Tap to toggle status test"
-              >
-                <span className="text-sm font-semibold tracking-wider text-slate-300">
+              <div className="flex flex-col items-center space-y-3 select-none">
+                <span
+                  onClick={() => {
+                    const next = !isSensorDotActive;
+                    setIsSensorDotActive(next);
+                    showToast(next ? 'Sensor Active (Sky Blue)' : 'Sensor Off');
+                  }}
+                  className="text-sm font-semibold tracking-wider text-slate-300 cursor-pointer"
+                >
                   conectyvity
                 </span>
 
-                {/* Dot:
-                    - White colour initially / when disconnected
-                    - Sky Blue (#38BDF8) when connectivity is active */}
-                <div
-                  className={`w-6 h-6 rounded-full transition-all duration-300 border-2 ${
-                    isConnected
-                      ? 'bg-[#38BDF8] border-sky-300 shadow-[0_0_22px_#38BDF8] scale-110'
-                      : 'bg-white border-slate-300 shadow-sm'
+                {/* Dot / Sensor:
+                    - Tapping on this sensor turns light Sky Blue (#38BDF8)!
+                    - NOT automatically when bluetooth is connected! */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !isSensorDotActive;
+                    setIsSensorDotActive(next);
+                    showToast(next ? 'Sensor Active (Sky Blue)' : 'Sensor Off');
+                  }}
+                  className={`w-7 h-7 rounded-full transition-all duration-300 border-2 cursor-pointer focus:outline-none ${
+                    isSensorDotActive
+                      ? 'bg-[#38BDF8] border-sky-300 shadow-[0_0_24px_#38BDF8] scale-110'
+                      : 'bg-white border-slate-300 shadow-sm hover:scale-105 active:scale-95'
                   }`}
+                  aria-label="Sensor indicator"
+                  title="Tap sensor to test"
                 />
 
-                {/* If connectivity is NOT present: show "not conectyvity" */}
-                {!isConnected && (
+                {/* If sensor is NOT active: show "not conectyvity" */}
+                {!isSensorDotActive && (
                   <span className="text-xs text-[#EF4444] font-medium tracking-wide">
                     not conectyvity
                   </span>
