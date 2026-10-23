@@ -23,34 +23,53 @@ import android.media.MediaRecorder
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
+import android.os.Bundle
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.util.Log
 import android.view.KeyEvent
+import java.util.Locale
 import kotlin.math.sqrt
 
 /**
+ * ==============================================================================
  * VoiceWakeWordService:
- * True Low-Power On-Device Wake-Word Engine with robust Bluetooth MediaSession & Proximity handling.
+ * 1. Voice Recording (AudioRecord & System Mic)
+ * 2. Speech Recognition (android.speech.SpeechRecognizer)
+ * 3. Voice Command Processing (processVoiceCommand -> swipeUp())
+ * 4. Proximity Sensor & Bluetooth Earbud MediaSession
+ * ==============================================================================
  */
 class VoiceWakeWordService : Service() {
 
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var wakeWord = "RIDER"
 
-    // Continuous On-Device Audio Engine
+    // 1. VOICE RECORDING (AudioRecord)
     @Volatile
     private var isAudioRunning = false
     private var audioThread: Thread? = null
     private var audioRecord: AudioRecord? = null
 
-    // Proximity Sensor (Wave hand near top of phone to swipe up)
+    // 2. SPEECH RECOGNITION (android.speech.SpeechRecognizer)
+    private var speechRecognizer: SpeechRecognizer? = null
+    @Volatile
+    private var isSpeechRecognizing = false
+    private var lastCommandTriggerTime = 0L
+
+    // 3. PROXIMITY SENSOR
     private var sensorManager: SensorManager? = null
     private var proximitySensor: Sensor? = null
     private var proximityListener: SensorEventListener? = null
 
-    // MediaSession & AudioManager to capture real Bluetooth Earbud Touch Sensor clicks globally
+    // 4. BLUETOOTH MEDIASESSION
     private var mediaSession: MediaSession? = null
     private var audioManager: AudioManager? = null
 
@@ -69,7 +88,7 @@ class VoiceWakeWordService : Service() {
         wakeWord = intent?.getStringExtra(EXTRA_WAKE_WORD) ?: "RIDER"
 
         try {
-            val notification = buildForegroundNotification("RIDER Active: Listening for '$wakeWord' / Earbud Taps...")
+            val notification = buildForegroundNotification("ƦƗƉƐƦ Active: Listening for '$wakeWord' / 'Next'...")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(
                     NOTIFICATION_ID,
@@ -80,22 +99,22 @@ class VoiceWakeWordService : Service() {
                 startForeground(NOTIFICATION_ID, notification)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start foreground notification: ${e.message}")
+            Log.e(TAG, "Notification error: ${e.message}")
         }
 
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            startSilentWakeWordEngine()
+            startVoiceRecordingAndDetection()
         }
 
         return START_STICKY
     }
 
-    /**
-     * TRUE ON-DEVICE WAKE-WORD ACOUSTIC ENGINE WITH STRICT SINGLE-SWIPE DEBOUNCE:
-     */
+    // ==============================================================================
+    // 1. VOICE RECORDING & LOW-POWER AUDIO MONITORING (AudioRecord)
+    // ==============================================================================
     @SuppressLint("MissingPermission")
-    private fun startSilentWakeWordEngine() {
-        if (isAudioRunning) return
+    private fun startVoiceRecordingAndDetection() {
+        if (isAudioRunning || !isVoiceEnabled) return
         isAudioRunning = true
 
         audioThread = Thread {
@@ -116,31 +135,40 @@ class VoiceWakeWordService : Service() {
                 )
 
                 if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-                    Log.e(TAG, "AudioRecord could not initialize.")
+                    Log.e(TAG, "AudioRecord could not initialize. Using SpeechRecognizer directly.")
+                    mainHandler.post { startSpeechRecognitionEngine() }
                     return@Thread
                 }
 
                 audioRecord?.startRecording()
-                Log.d(TAG, "Silent On-Device Wake-Word Engine active.")
+                Log.d(TAG, "AudioRecord active: monitoring voice energy...")
 
                 val frame = ShortArray(frameSamples)
                 var ambientBaseline = 150.0
-                var lastDetectionTime = 0L
 
-                var inSpeech = false
-                var speechFrames = 0
-                var syllable1Frames = 0
-                var dipFrames = 0
-                var syllable2Frames = 0
-                var syllablePhase = 0
+                while (isAudioRunning && isVoiceEnabled) {
+                    if (isSpeechRecognizing) {
+                        Thread.sleep(120)
+                        continue
+                    }
 
-                while (isAudioRunning) {
+                    // Ensure recording is active if not in speech recognition
+                    if (audioRecord?.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                        try {
+                            audioRecord?.startRecording()
+                        } catch (_: Exception) {
+                            Thread.sleep(100)
+                            continue
+                        }
+                    }
+
                     val readSamples = audioRecord?.read(frame, 0, frame.size) ?: 0
                     if (readSamples <= 0) {
                         Thread.sleep(10)
                         continue
                     }
 
+                    // Calculate Frame Energy (RMS)
                     var sumSq = 0.0
                     for (i in 0 until readSamples) {
                         val sample = frame[i]
@@ -148,75 +176,24 @@ class VoiceWakeWordService : Service() {
                     }
                     val frameRms = sqrt(sumSq / readSamples)
 
-                    if (!inSpeech) {
-                        ambientBaseline = (ambientBaseline * 0.96) + (frameRms * 0.04)
+                    ambientBaseline = (ambientBaseline * 0.96) + (frameRms * 0.04)
+                    val voiceThreshold = maxOf(ambientBaseline * 2.3, 400.0)
+
+                    // Human voice energy spike detected! Trigger speech recognizer burst
+                    val now = System.currentTimeMillis()
+                    if (frameRms > voiceThreshold && (now - lastCommandTriggerTime > 2500)) {
+                        Log.d(TAG, "Voice energy spike (RMS: $frameRms). Freeing mic for speech recognition burst...")
+                        // Stop AudioRecord temporarily so SpeechRecognizer gets 100% exclusive access to the microphone
+                        try {
+                            audioRecord?.stop()
+                        } catch (_: Exception) {}
+                        mainHandler.post { startSpeechRecognitionEngine() }
                     }
 
-                    val speechThreshold = maxOf(ambientBaseline * 2.3, 400.0)
-                    val isVoiceFrame = frameRms > speechThreshold
-
-                    if (isVoiceFrame) {
-                        if (!inSpeech) {
-                            inSpeech = true
-                            speechFrames = 0
-                            syllablePhase = 1
-                            syllable1Frames = 0
-                            dipFrames = 0
-                            syllable2Frames = 0
-                        }
-
-                        speechFrames++
-
-                        if (syllablePhase == 1) {
-                            syllable1Frames++
-                        } else if (syllablePhase == 2) {
-                            syllablePhase = 3
-                            syllable2Frames = 1
-                        } else if (syllablePhase == 3) {
-                            syllable2Frames++
-                        }
-                    } else {
-                        if (inSpeech) {
-                            speechFrames++
-
-                            if (syllablePhase == 1 && syllable1Frames >= 5) {
-                                syllablePhase = 2
-                                dipFrames = 1
-                            } else if (syllablePhase == 2) {
-                                dipFrames++
-                                if (dipFrames > 12) {
-                                    inSpeech = false
-                                    syllablePhase = 0
-                                }
-                            } else if (syllablePhase == 3) {
-                                val now = System.currentTimeMillis()
-                                val totalDurationMs = speechFrames * 20
-
-                                val isTwoSyllableWakeWord = syllable1Frames in 4..18 &&
-                                        dipFrames in 1..10 &&
-                                        syllable2Frames in 3..15 &&
-                                        totalDurationMs in 240..780
-
-                                if (isTwoSyllableWakeWord && (now - lastDetectionTime > 2500)) {
-                                    lastDetectionTime = now
-                                    Log.d(TAG, "WAKE-WORD RECOGNIZED! ($wakeWord). Dispatching EXACTLY ONE swipe up...")
-                                    triggerHapticFeedback()
-                                    RiderAccessibilityService.instance?.swipeUp()
-                                }
-
-                                inSpeech = false
-                                syllablePhase = 0
-                            }
-                        }
-                    }
-
-                    if (speechFrames > 55) {
-                        inSpeech = false
-                        syllablePhase = 0
-                    }
+                    Thread.sleep(40)
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "AudioRecord error: ${e.message}")
+                Log.e(TAG, "AudioRecord loop error: ${e.message}")
             } finally {
                 try {
                     audioRecord?.stop()
@@ -225,15 +202,140 @@ class VoiceWakeWordService : Service() {
                 audioRecord = null
             }
         }.apply {
-            name = "RiderSilentWakeWordThread"
+            name = "RiderVoiceRecordingThread"
             priority = Thread.NORM_PRIORITY
             start()
         }
     }
 
+    // ==============================================================================
+    // 2. SPEECH RECOGNITION (android.speech.SpeechRecognizer)
+    // ==============================================================================
+    private fun startSpeechRecognitionEngine() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            Log.w(TAG, "SpeechRecognizer not available on this device.")
+            return
+        }
+        if (isSpeechRecognizing) return
+        isSpeechRecognizing = true
+
+        try {
+            speechRecognizer?.destroy()
+        } catch (_: Exception) {}
+
+        try {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
+                setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: Bundle?) {}
+                    override fun onBeginningOfSpeech() {}
+                    override fun onRmsChanged(rmsdB: Float) {}
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+                    
+                    override fun onEndOfSpeech() {
+                        finishSpeechRecognition()
+                    }
+
+                    override fun onError(error: Int) {
+                        Log.d(TAG, "SpeechRecognizer error: $error")
+                        finishSpeechRecognition()
+                    }
+
+                    override fun onResults(results: Bundle?) {
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        handleSpeechResults(matches)
+                        finishSpeechRecognition()
+                    }
+
+                    override fun onPartialResults(partialResults: Bundle?) {
+                        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        handleSpeechResults(matches)
+                    }
+
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
+                })
+            }
+
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            }
+            speechRecognizer?.startListening(intent)
+
+            // Auto-timeout after 1800ms
+            mainHandler.postDelayed({
+                finishSpeechRecognition()
+            }, 1800)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error starting speech recognition: ${e.message}")
+            finishSpeechRecognition()
+        }
+    }
+
+    private fun finishSpeechRecognition() {
+        if (!isSpeechRecognizing) return
+        isSpeechRecognizing = false
+        try {
+            speechRecognizer?.stopListening()
+            speechRecognizer?.destroy()
+        } catch (_: Exception) {}
+        speechRecognizer = null
+    }
+
+    private fun handleSpeechResults(matches: List<String>?) {
+        if (matches.isNullOrEmpty()) return
+        for (phrase in matches) {
+            Log.d(TAG, "Recognized speech: $phrase")
+            val wasExecuted = processVoiceCommand(phrase)
+            if (wasExecuted) break
+        }
+    }
+
+    // ==============================================================================
+    // 3. VOICE COMMAND PROCESSING LOGIC (processVoiceCommand -> swipeUp())
+    // ==============================================================================
     /**
-     * Proximity Sensor: Swipes up when a finger/hand/glove passes near the top of the phone
+     * Checks spoken text for keywords: "RIDER", "NEXT", "SWIPE", "UP", "VARTI"
+     * Enforces strict 2.5s debounce to prevent double-scrolling!
+     * Returns true if command matched and executed.
      */
+    fun processVoiceCommand(spokenText: String): Boolean {
+        if (!isVoiceEnabled) return false
+        val lower = spokenText.lowercase(Locale.ROOT)
+        val now = System.currentTimeMillis()
+
+        // 2.5 second cooldown between swipes
+        if (now - lastCommandTriggerTime < 2500) {
+            return false
+        }
+
+        val isRider = lower.contains("rider") || lower.contains("ryder") || lower.contains("raider")
+        val isNext = lower.contains("next") || lower.contains("nxt")
+        val isSwipe = lower.contains("swipe") || lower.contains("up")
+        val isVarti = lower.contains("varti") || lower.contains("var") || lower.contains("वर") || lower.contains("वरती")
+
+        val isMatched = when (wakeWord.uppercase(Locale.ROOT)) {
+            "RIDER" -> isRider || isNext || isSwipe
+            "NEXT" -> isNext || isRider || isSwipe
+            else -> isRider || isNext || isSwipe || isVarti
+        }
+
+        if (isMatched) {
+            lastCommandTriggerTime = now
+            Log.d(TAG, "VOICE COMMAND MATCHED: '$spokenText'! Executing swipeUp()...")
+            triggerHapticFeedback()
+            val success = RiderAccessibilityService.instance?.swipeUp() ?: false
+            Log.d(TAG, "Swipe result: $success")
+            return true
+        }
+
+        return false
+    }
+
+    // ==============================================================================
+    // 4. HARDWARE PROXIMITY SENSOR
+    // ==============================================================================
     private fun initProximitySensor() {
         try {
             sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
@@ -252,7 +354,7 @@ class VoiceWakeWordService : Service() {
                             val now = System.currentTimeMillis()
                             if (now - lastTriggerTime > 1000) {
                                 lastTriggerTime = now
-                                Log.d(TAG, "Proximity hand wave detected! Swiping up at center...")
+                                Log.d(TAG, "Proximity wave detected! Swiping up...")
                                 triggerHapticFeedback()
                                 RiderAccessibilityService.instance?.swipeUp()
                             }
@@ -267,16 +369,15 @@ class VoiceWakeWordService : Service() {
                     proximitySensor,
                     SensorManager.SENSOR_DELAY_UI
                 )
-                Log.d(TAG, "Proximity sensor registered successfully")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error initializing proximity sensor: ${e.message}")
+            Log.e(TAG, "Proximity init error: ${e.message}")
         }
     }
 
-    /**
-     * ROBUST BLUETOOTH MEDIASESSION & AUDIO FOCUS ROUTING:
-     */
+    // ==============================================================================
+    // 5. BLUETOOTH EARBUDS MEDIASESSION ROUTING
+    // ==============================================================================
     private fun initMediaSessionForEarbuds() {
         try {
             audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
@@ -295,7 +396,6 @@ class VoiceWakeWordService : Service() {
 
             mediaSession = MediaSession(this, "RiderEarbudsActiveSession").apply {
                 setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
-
                 setPlaybackState(
                     PlaybackState.Builder()
                         .setState(PlaybackState.STATE_PLAYING, 0L, 1.0f)
@@ -318,7 +418,7 @@ class VoiceWakeWordService : Service() {
                             val now = System.currentTimeMillis()
                             if (now - lastEarbudClickTime > 1000) {
                                 lastEarbudClickTime = now
-                                Log.d(TAG, "ROBUST BLUETOOTH EARBUD CLICKED: key ${keyEvent.keyCode}! Triggering swipeUp()...")
+                                Log.d(TAG, "Bluetooth earbud tap clicked! Swiping up...")
                                 triggerHapticFeedback()
                                 RiderAccessibilityService.instance?.swipeUp()
                             }
@@ -329,10 +429,8 @@ class VoiceWakeWordService : Service() {
                 })
                 isActive = true
             }
-
-            Log.d(TAG, "Robust Bluetooth MediaSession initialized successfully")
         } catch (e: Exception) {
-            Log.e(TAG, "Error setting up robust Bluetooth MediaSession: ${e.message}")
+            Log.e(TAG, "MediaSession setup error: ${e.message}")
         }
     }
 
@@ -381,7 +479,7 @@ class VoiceWakeWordService : Service() {
         }
 
         return builder
-            .setContentTitle("RIDER")
+            .setContentTitle("ƦƗƉƐƦ")
             .setContentText(contentText)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
@@ -405,6 +503,11 @@ class VoiceWakeWordService : Service() {
         audioRecord = null
 
         try {
+            speechRecognizer?.destroy()
+        } catch (_: Exception) {}
+        speechRecognizer = null
+
+        try {
             proximityListener?.let { sensorManager?.unregisterListener(it) }
         } catch (_: Exception) {}
 
@@ -426,6 +529,9 @@ class VoiceWakeWordService : Service() {
         @Volatile
         var isServiceRunning: Boolean = false
             private set
+
+        @Volatile
+        var isVoiceEnabled: Boolean = true
 
         @Volatile
         var isProximityEnabled: Boolean = true

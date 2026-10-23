@@ -1,433 +1,346 @@
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  Home,
-  Bluetooth,
-  ChevronUp,
-  Battery,
-  BatteryCharging,
-  Shield,
-  Play,
-  Sparkles,
-  Repeat
-} from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Bluetooth, ChevronLeft, Power, Sparkles, X } from 'lucide-react';
 
-type AssistantName = 'VARTI' | 'RIDER' | 'BUDDY';
-
-interface EarbudDevice {
-  name: string;
-  connected: boolean;
-  leftBattery: number;
-  rightBattery: number;
-  caseBattery: number;
-  address: string;
-}
+type TestType = 'voice' | 'proxymity' | 'blutooth';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'home' | 'bluetooth'>('home');
+  // Navigation & State
+  const [currentScreen, setCurrentScreen] = useState<'main' | 'test_screen'>('main');
+  const [activeTest, setActiveTest] = useState<TestType>('proxymity');
 
-  // Assistant & Wake-word State: Default to "VARTI" as requested!
-  const [selectedAssistant, setSelectedAssistant] = useState<AssistantName>('VARTI');
-  const [accessibilityGranted, setAccessibilityGranted] = useState<boolean>(false);
-  const [showAccessibilityModal, setShowAccessibilityModal] = useState<boolean>(false);
+  // Start Window State
+  const [showStartWindow, setShowStartWindow] = useState(false);
+  const [voiceOn, setVoiceOn] = useState(true);
+  const [proxymityOn, setProxymityOn] = useState(true);
+  const [blutoothOn, setBlutoothOn] = useState(true);
 
-  // Gesture Swipe State
-  const [isSwiping, setIsSwiping] = useState<boolean>(false);
-  const [swipeSource, setSwipeSource] = useState<string>('');
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const toastTimeoutRef = useRef<number | null>(null);
+  // Test Selection State
+  const [showTestMenu, setShowTestMenu] = useState(false);
 
-  // Bluetooth Earbuds State
-  const [device, setDevice] = useState<EarbudDevice>({
-    name: 'Rider AirBuds Pro',
-    connected: true,
-    leftBattery: 85,
-    rightBattery: 90,
-    caseBattery: 95,
-    address: '4A:26:9F:8B:12:00',
-  });
+  // Connectivity & Sensor Detection States
+  // Real check: Bluetooth is not connected by default unless connected
+  const [isBluetoothConnected, setIsBluetoothConnected] = useState(false);
+  const [isSensorActive, setIsSensorActive] = useState(false);
+  const [voiceDetected, setVoiceDetected] = useState(false);
 
-  const showToast = (msg: string, dur = 3000) => {
-    if (toastTimeoutRef.current) window.clearTimeout(toastTimeoutRef.current);
-    setToastMessage(msg);
-    toastTimeoutRef.current = window.setTimeout(() => setToastMessage(null), dur);
+  // Toast for feedback
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 2500);
   };
 
-  // Trigger Center Upward Swipe Gesture
-  const triggerCenterSwipe = (source: string) => {
-    if (!accessibilityGranted) {
-      setShowAccessibilityModal(true);
-      showToast('Please enable Accessibility Permission to perform swipe gestures', 3500);
-      return;
+  // Open Full-Screen Test for specific item
+  const openTestScreen = (test: TestType) => {
+    setActiveTest(test);
+    setIsSensorActive(false);
+    setVoiceDetected(false);
+    setShowTestMenu(false);
+    setCurrentScreen('test_screen');
+  };
+
+  // Determine connectivity status for the active test
+  const getIsConnected = () => {
+    if (activeTest === 'blutooth') {
+      return isBluetoothConnected;
     }
-
-    setSwipeSource(source);
-    setIsSwiping(true);
-    showToast(`"${source}" Swiped Up at Center!`, 2000);
-
-    if (typeof navigator !== 'undefined' && navigator.vibrate) {
-      navigator.vibrate([40, 50]);
+    if (activeTest === 'proxymity') {
+      return isSensorActive;
     }
-
-    setTimeout(() => {
-      setIsSwiping(false);
-      setSwipeSource('');
-    }, 850);
-  };
-
-  // Small Play / Start button handler
-  const handleStartToggle = () => {
-    if (!accessibilityGranted) {
-      setShowAccessibilityModal(true);
-      showToast('Enable Accessibility Permission first', 3000);
-      return;
+    if (activeTest === 'voice') {
+      return voiceDetected;
     }
-
-    showToast(`RIDER Active! Say "${getAssistantDisplay()}", or wave hand near top sensor to swipe.`, 3500);
+    return false;
   };
 
-  // Single button toggle cycling through Varti -> Rider -> Buddy
-  // "tyat rider aani budy chya jagevar varti ghe as pan add kar oky fkt varti as aayku aal tari gheil oky"
-  const handleToggleWakeWord = () => {
-    const nextAssistant =
-      selectedAssistant === 'VARTI' ? 'RIDER' : selectedAssistant === 'RIDER' ? 'BUDDY' : 'VARTI';
-    setSelectedAssistant(nextAssistant);
-    const display = nextAssistant === 'VARTI' ? 'Say Varti (वरती)' : `Say ${nextAssistant}`;
-    showToast(`Switched to "${display}"! Tap to switch again`, 2000);
-  };
-
-  const getAssistantDisplay = () => {
-    if (selectedAssistant === 'VARTI') return 'Varti (वरती)';
-    return selectedAssistant;
-  };
-
-  const getNextOptionName = () => {
-    if (selectedAssistant === 'VARTI') return 'Rider';
-    if (selectedAssistant === 'RIDER') return 'Buddy';
-    return 'Varti';
-  };
-
-  const confirmAccessibilityPermission = () => {
-    setAccessibilityGranted(true);
-    setShowAccessibilityModal(false);
-    showToast(`Accessibility Permission Granted!`, 2500);
-  };
+  const isConnected = getIsConnected();
 
   return (
-    <div className="relative min-h-screen w-full bg-[#0b0f19] text-white flex flex-col justify-between font-sans overflow-x-hidden selection:bg-[#38bdf8]/30">
+    <div className="min-h-screen w-full bg-[#080C14] text-white flex flex-col items-center justify-between font-sans selection:bg-pink-500/30 overflow-x-hidden">
       
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-slate-900/95 border border-sky-500/40 text-white text-xs shadow-[0_10px_30px_rgba(0,0,0,0.8)] backdrop-blur-md animate-fade-in flex items-center space-x-2">
-          <Sparkles className="w-3.5 h-3.5 text-[#38bdf8] animate-spin" />
-          <span>{toastMessage}</span>
+      {/* Toast Feedback */}
+      {toastMsg && (
+        <div className="fixed top-5 z-50 px-4 py-2 rounded-full bg-slate-900 border border-sky-400 text-sky-300 text-xs shadow-2xl backdrop-blur-md animate-fade-in flex items-center space-x-2">
+          <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+          <span>{toastMsg}</span>
         </div>
       )}
 
-      {/* CENTER UPWARD SWIPE GESTURE ANIMATION OVERLAY */}
-      {isSwiping && (
-        <div className="fixed inset-0 pointer-events-none z-40 flex flex-col items-center justify-center">
-          <div className="relative w-full h-full flex flex-col items-center justify-center">
-            <div className="absolute w-72 h-72 rounded-full bg-sky-500/15 blur-3xl animate-pulse" />
-            <div className="relative flex flex-col items-center">
-              <div className="text-center mb-4">
-                <span className="px-3.5 py-1 rounded-full bg-sky-500/20 border border-sky-400 text-sky-300 font-mono text-xs tracking-wider shadow-lg flex items-center space-x-1.5">
-                  <ChevronUp className="w-3.5 h-3.5 animate-bounce" />
-                  <span>SWIPING UP ({swipeSource})</span>
-                </span>
-              </div>
-              <div className="relative w-1.5 h-64 bg-gradient-to-t from-sky-400/10 via-sky-400 to-white rounded-full shadow-[0_0_20px_#38bdf8] overflow-hidden flex flex-col justify-end">
-                <div className="w-full bg-white h-20 rounded-full shadow-[0_0_15px_#ffffff] animate-ping" />
-              </div>
-              <div className="w-12 h-12 rounded-full border-3 border-sky-400 bg-sky-400/20 shadow-[0_0_25px_#38bdf8] animate-ping mt-1" />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TOP HEADER */}
-      <header className="w-full px-5 pt-5 pb-2 flex items-center justify-between">
-        <div className="flex items-center space-x-2.5">
-          <img
-            src="/assets/aistudio/image_20a2461d.png"
-            alt="RIDER"
-            className="w-8 h-8 rounded-xl object-cover border border-sky-400/50 shadow-[0_0_10px_rgba(56,189,248,0.4)]"
-          />
-          <h1 className="text-xl font-black text-[#38bdf8] tracking-widest leading-none">
-            RIDER
-          </h1>
-        </div>
-
-        {/* Accessibility Status Pill */}
-        <button
-          onClick={() => setShowAccessibilityModal(true)}
-          className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border flex items-center space-x-1 transition-all ${
-            accessibilityGranted
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-              : 'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse'
-          }`}
-        >
-          <Shield className="w-3 h-3" />
-          <span>{accessibilityGranted ? 'Active' : 'Permission'}</span>
-        </button>
-      </header>
-
-      {/* MAIN CONTENT AREA */}
-      <main className="flex-1 w-full max-w-sm mx-auto flex flex-col justify-center px-4 py-2">
-
-        {/* ========================================================== */}
-        {/* 1. HOME SCREEN: Play Start, Wake Word (Varti/Rider/Buddy)  */}
-        {/* ========================================================== */}
-        {activeTab === 'home' && (
-          <div className="w-full flex-1 flex flex-col justify-center items-center py-6 space-y-7 animate-fade-in">
-
-            {/* Small icon-only "LET'S START" button */}
-            <div className="flex flex-col items-center">
-              <button
-                onClick={handleStartToggle}
-                className="w-16 h-16 rounded-full bg-gradient-to-tr from-sky-500 via-sky-400 to-cyan-300 hover:scale-105 active:scale-95 text-slate-950 flex items-center justify-center shadow-[0_0_25px_rgba(56,189,248,0.4)] transition-all cursor-pointer"
-                title="Start RIDER"
-              >
-                <Play className="w-7 h-7 fill-slate-950 ml-0.5" />
-              </button>
-            </div>
-
-            {/* Combined "Say Varti" / "Say Rider" / "Say Buddy" Interactive Button */}
-            <div className="w-full flex flex-col items-center space-y-2.5">
-              <button
-                onClick={handleToggleWakeWord}
-                className="w-full py-3.5 px-5 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 active:scale-98 text-white font-bold text-sm tracking-wide shadow-lg transition-all flex items-center justify-between group cursor-pointer"
-              >
-                <div className="flex items-center space-x-2">
-                  <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping" />
-                  <span className="text-white text-sm">
-                    Say <span className="text-[#38bdf8] font-black">{getAssistantDisplay()}</span>
-                  </span>
-                </div>
-
-                <div className="flex items-center space-x-1.5 text-xs text-slate-400 group-hover:text-sky-300">
-                  <Repeat className="w-3.5 h-3.5" />
-                  <span className="text-[11px]">
-                    Tap for {getNextOptionName()}
-                  </span>
-                </div>
-              </button>
-
-              {/* Quick Test Trigger */}
-              <button
-                onClick={() => triggerCenterSwipe(`Say ${selectedAssistant}`)}
-                className="text-xs text-sky-400 hover:text-sky-300 flex items-center space-x-1 py-1 px-3 rounded-lg hover:bg-slate-800/40 transition-colors cursor-pointer"
-              >
-                <ChevronUp className="w-3.5 h-3.5" />
-                <span>Test "Say {selectedAssistant}" Swipe</span>
-              </button>
-            </div>
-
-          </div>
-        )}
-
-        {/* ========================================================== */}
-        {/* 2. BLUETOOTH SCREEN: Clean Charging & Touch Sensors Only   */}
-        {/* ========================================================== */}
-        {activeTab === 'bluetooth' && (
-          <div className="w-full flex-1 flex flex-col justify-center py-4 space-y-5 animate-fade-in">
+      {/* Main App Container */}
+      <div className="relative w-full max-w-sm flex-1 flex flex-col justify-between p-6 bg-[#0B0F19] shadow-2xl border-x border-slate-900">
+        
+        {/* ============================================================== */}
+        {/* SCREEN 1: MAIN SCREEN                                          */}
+        {/* ============================================================== */}
+        {currentScreen === 'main' ? (
+          <div className="flex-1 flex flex-col justify-between">
             
-            {/* Device Name */}
-            <div className="text-center">
-              <h2 className="text-base font-bold text-white tracking-wide">
-                {device.name}
-              </h2>
+            {/* TOP HEADER: ƦƗƉƐƦ Title + Top Right [Ʀ] in Pink + Bluetooth Icon below it */}
+            <div className="w-full flex items-start justify-between pt-2">
+              {/* Title ƦƗƉƐƦ */}
+              <h1 className="text-2xl font-black text-white tracking-widest select-none">
+                ƦƗƉƐƦ
+              </h1>
+
+              {/* Top Right: Ʀ (Pink) & Bluetooth Icon below it */}
+              <div className="flex flex-col items-center space-y-2">
+                {/* Ʀ in Pink Color */}
+                <span className="text-2xl font-black text-[#FF2A85] select-none leading-none">
+                  Ʀ
+                </span>
+
+                {/* Bluetooth Icon below Ʀ: Display only (Colourful Sky Blue if connected, White if not) */}
+                <div
+                  className="p-1 select-none pointer-events-none"
+                  aria-label="Bluetooth Status"
+                >
+                  <Bluetooth
+                    className={`w-5 h-5 transition-colors ${
+                      isBluetoothConnected
+                        ? 'text-[#38BDF8] drop-shadow-[0_0_8px_#38BDF8]'
+                        : 'text-white opacity-90'
+                    }`}
+                  />
+                </div>
+              </div>
             </div>
 
-            {/* Earbuds & Case with Touch Sensors & Charging
-                "konty pan bird chya sensor la tuch kel ki swipe vhv oky yaat fkt charging dakhvel oky riyal" */}
-            <div className="grid grid-cols-3 gap-2.5 items-center">
+            {/* CENTER: START BUTTON */}
+            <div className="flex-1 flex flex-col items-center justify-center my-8">
+              <button
+                onClick={() => setShowStartWindow(true)}
+                className="w-28 h-28 rounded-full bg-gradient-to-tr from-[#0284C7] to-[#38BDF8] hover:scale-105 active:scale-95 text-white flex flex-col items-center justify-center shadow-[0_0_35px_rgba(56,189,248,0.4)] transition-all cursor-pointer border-2 border-sky-300"
+                title="Start"
+              >
+                <Power className="w-9 h-9 stroke-[2.5]" />
+                <span className="text-xs font-black tracking-widest mt-1">START</span>
+              </button>
+            </div>
+
+            {/* TEST SECTION & BOTTOM */}
+            <div className="w-full flex flex-col items-center space-y-4 pb-2">
               
-              {/* Left Earbud */}
-              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-2.5 flex flex-col items-center">
-                <span className="text-[9px] font-bold text-sky-400 mb-0.5">LEFT</span>
+              {/* TEST BUTTON */}
+              <div className="w-full relative">
                 <button
-                  onClick={() => triggerCenterSwipe('Left Earbud Sensor')}
-                  className="relative p-1 rounded-lg hover:bg-slate-800 transition-all text-center group cursor-pointer"
-                  title="Click sensor to swipe"
+                  onClick={() => setShowTestMenu(!showTestMenu)}
+                  className="w-full py-3.5 px-4 rounded-xl bg-[#1E293B] hover:bg-slate-700 active:scale-98 text-white font-bold text-sm tracking-wider shadow-lg border border-slate-700 transition-all cursor-pointer flex items-center justify-center space-x-2"
                 >
-                  <div className="w-11 h-14 flex items-center justify-center">
-                    <LeftEarbudSvg />
-                  </div>
-                  <span className="text-[8px] px-1 py-0.2 rounded bg-sky-500/20 text-sky-300 border border-sky-400/40 block mt-0.5 font-semibold">
-                    Sensor
-                  </span>
+                  <span>test</span>
                 </button>
-                <div className="w-full mt-1.5 pt-1 border-t border-slate-800 text-center text-[11px] font-bold text-white flex items-center justify-center space-x-1">
-                  <Battery className="w-3 h-3 text-emerald-400" />
-                  <span>{device.leftBattery}%</span>
-                </div>
-              </div>
 
-              {/* Case */}
-              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-2.5 flex flex-col items-center">
-                <span className="text-[9px] font-bold text-slate-400 mb-0.5">CASE</span>
-                <div className="w-11 h-14 flex items-center justify-center">
-                  <EarbudsCaseSvg />
-                </div>
-                <div className="w-full mt-1.5 pt-1 border-t border-slate-800 text-center text-[11px] font-bold text-white flex items-center justify-center space-x-1">
-                  <BatteryCharging className="w-3 h-3 text-sky-400" />
-                  <span>{device.caseBattery}%</span>
-                </div>
-              </div>
+                {/* Dropdown / Menu when TEST is clicked:
+                    1 ] voice             test
+                    2 ] proxymity    test
+                    3 ] blutooth       test */}
+                {showTestMenu && (
+                  <div className="absolute bottom-full mb-2 w-full bg-[#101827] border-2 border-slate-700 rounded-2xl p-3 shadow-2xl space-y-2 z-30 animate-fade-in">
+                    <button
+                      onClick={() => openTestScreen('voice')}
+                      className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-between text-xs font-bold text-slate-200 cursor-pointer active:scale-98 transition-all"
+                    >
+                      <span>1 ] voice</span>
+                      <span className="text-[#38BDF8] uppercase font-mono">test</span>
+                    </button>
 
-              {/* Right Earbud */}
-              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-2.5 flex flex-col items-center">
-                <span className="text-[9px] font-bold text-sky-400 mb-0.5">RIGHT</span>
-                <button
-                  onClick={() => triggerCenterSwipe('Right Earbud Sensor')}
-                  className="relative p-1 rounded-lg hover:bg-slate-800 transition-all text-center group cursor-pointer"
-                  title="Click sensor to swipe"
-                >
-                  <div className="w-11 h-14 flex items-center justify-center">
-                    <RightEarbudSvg />
+                    <button
+                      onClick={() => openTestScreen('proxymity')}
+                      className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-between text-xs font-bold text-slate-200 cursor-pointer active:scale-98 transition-all"
+                    >
+                      <span>2 ] proxymity</span>
+                      <span className="text-[#38BDF8] uppercase font-mono">test</span>
+                    </button>
+
+                    <button
+                      onClick={() => openTestScreen('blutooth')}
+                      className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-between text-xs font-bold text-slate-200 cursor-pointer active:scale-98 transition-all"
+                    >
+                      <span>3 ] blutooth</span>
+                      <span className="text-[#38BDF8] uppercase font-mono">test</span>
+                    </button>
                   </div>
-                  <span className="text-[8px] px-1 py-0.2 rounded bg-sky-500/20 text-sky-300 border border-sky-400/40 block mt-0.5 font-semibold">
-                    Sensor
-                  </span>
-                </button>
-                <div className="w-full mt-1.5 pt-1 border-t border-slate-800 text-center text-[11px] font-bold text-white flex items-center justify-center space-x-1">
-                  <Battery className="w-3 h-3 text-emerald-400" />
-                  <span>{device.rightBattery}%</span>
-                </div>
+                )}
               </div>
 
-            </div>
-
-          </div>
-        )}
-
-      </main>
-
-      {/* BOTTOM NAVIGATION: Compact ribbon + "created by rider" at very bottom */}
-      <footer className="w-full max-w-sm mx-auto px-4 pt-1.5 pb-2 bg-[#0b0f19] border-t border-slate-800/60 sticky bottom-0 z-30">
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            onClick={() => setActiveTab('home')}
-            className={`py-1.5 px-3 rounded-xl flex items-center justify-center space-x-1.5 font-bold text-xs transition-all ${
-              activeTab === 'home'
-                ? 'bg-sky-500 text-slate-950 shadow-sm'
-                : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-            }`}
-          >
-            <Home className="w-3.5 h-3.5" />
-            <span>RIDER</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('bluetooth')}
-            className={`py-1.5 px-3 rounded-xl flex items-center justify-center space-x-1.5 font-bold text-xs transition-all ${
-              activeTab === 'bluetooth'
-                ? 'bg-sky-500 text-slate-950 shadow-sm'
-                : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-            }`}
-          >
-            <Bluetooth className="w-3.5 h-3.5" />
-            <span>Earbuds</span>
-          </button>
-        </div>
-
-        <p className="text-[9px] text-slate-500 text-center tracking-widest lowercase pt-1.5 font-mono select-none">
-          created by rider
-        </p>
-      </footer>
-
-      {/* ACCESSIBILITY PERMISSION MODAL */}
-      {showAccessibilityModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-[#101827] border border-sky-500/40 rounded-3xl w-full max-w-xs p-4 shadow-2xl relative">
-            <div className="text-center mb-3">
-              <h3 className="text-sm font-bold text-white">
-                Accessibility Permission
-              </h3>
-              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                Allow RIDER to perform hands-free upward swipe gestures when you say <strong className="text-sky-400 font-bold">"{selectedAssistant}"</strong>.
+              {/* BOTTOM TEXT: created by ƦƗƉƐƦ in small letters */}
+              <p className="text-[10px] text-slate-400 font-mono tracking-wider select-none pt-1">
+                created by ƦƗƉƐƦ
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 mt-4">
+          </div>
+        ) : (
+          /* ============================================================== */
+          /* SCREEN 2: FULL SCREEN TEST (voice / proxymity / blutooth)      */
+          /* "tyat fkt asel click sensor aani khali asel conectyvity        */
+          /*  aani white colur cha dot jar conectyvity milali tar dot       */
+          /*  sky blue hoil oky asach blutooth aani voice cha pan oky       */
+          /*  aani conectyvity nasel tar not conectyvity as lihlel asel"   */
+          /* ============================================================== */
+          <div className="flex-1 flex flex-col justify-between py-2">
+            
+            {/* Top Bar with Back Button */}
+            <div className="w-full flex items-center justify-between border-b border-slate-800/80 pb-3">
               <button
-                onClick={() => setShowAccessibilityModal(false)}
-                className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                onClick={() => setCurrentScreen('main')}
+                className="flex items-center space-x-1 text-xs text-slate-400 hover:text-white cursor-pointer"
               >
-                Cancel
+                <ChevronLeft className="w-4 h-4" />
+                <span>back</span>
               </button>
-              <button
-                onClick={confirmAccessibilityPermission}
-                className="py-2 px-3 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-bold shadow-md"
+
+              <span className="text-xs font-bold text-slate-300 uppercase tracking-widest font-mono">
+                {activeTest}
+              </span>
+            </div>
+
+            {/* Center Content:
+                conectyvity
+                dot (White -> Sky Blue when connected, else 'not conectyvity') */}
+            <div className="flex-1 flex flex-col items-center justify-center space-y-7">
+              
+              {/* Connectivity section */}
+              <div
+                onClick={() => {
+                  if (activeTest === 'proxymity') {
+                    const next = !isSensorActive;
+                    setIsSensorActive(next);
+                    showToast(next ? 'Sensor Connected!' : 'Sensor Idle');
+                  } else if (activeTest === 'voice') {
+                    const next = !voiceDetected;
+                    setVoiceDetected(next);
+                    showToast(next ? 'Voice Heard!' : 'Voice Idle');
+                  } else if (activeTest === 'blutooth') {
+                    const next = !isBluetoothConnected;
+                    setIsBluetoothConnected(next);
+                    showToast(next ? 'Bluetooth Connected' : 'Bluetooth Disconnected');
+                  }
+                }}
+                className="flex flex-col items-center space-y-3 cursor-pointer select-none p-4 rounded-2xl hover:bg-slate-900/40 transition-colors"
+                title="Tap to toggle status test"
               >
-                Allow
+                <span className="text-sm font-semibold tracking-wider text-slate-300">
+                  conectyvity
+                </span>
+
+                {/* Dot:
+                    - White colour initially / when disconnected
+                    - Sky Blue (#38BDF8) when connectivity is active */}
+                <div
+                  className={`w-6 h-6 rounded-full transition-all duration-300 border-2 ${
+                    isConnected
+                      ? 'bg-[#38BDF8] border-sky-300 shadow-[0_0_22px_#38BDF8] scale-110'
+                      : 'bg-white border-slate-300 shadow-sm'
+                  }`}
+                />
+
+                {/* If connectivity is NOT present: show "not conectyvity" */}
+                {!isConnected && (
+                  <span className="text-xs text-[#EF4444] font-medium tracking-wide">
+                    not conectyvity
+                  </span>
+                )}
+              </div>
+
+            </div>
+
+            {/* Bottom: Return to main */}
+            <div className="w-full flex justify-center pb-2">
+              <p className="text-[10px] text-slate-500 font-mono tracking-wider select-none">
+                created by ƦƗƉƐƦ
+              </p>
+            </div>
+
+          </div>
+        )}
+
+      </div>
+
+      {/* ============================================================== */}
+      {/* START WINDOW (MODAL):                                          */}
+      {/* 1 ] voice             on                                       */}
+      {/* 2 ] proxymity    on                                            */}
+      {/* 3 ] blutooth   on                                              */}
+      {/* ============================================================== */}
+      {showStartWindow && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#101827] border-2 border-slate-700 rounded-3xl w-full max-w-xs p-5 shadow-2xl space-y-4 animate-scale-in">
+            
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <span className="text-sm font-bold text-white tracking-wide">
+                Start Configuration
+              </span>
+              <button
+                onClick={() => setShowStartWindow(false)}
+                className="text-slate-400 hover:text-white p-1 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
               </button>
             </div>
+
+            {/* 1 ] voice on */}
+            <div className="flex items-center justify-between py-2 border-b border-slate-800/80">
+              <span className="text-xs font-bold text-slate-200">
+                1 ] voice
+              </span>
+              <button
+                onClick={() => setVoiceOn(!voiceOn)}
+                className={`px-3 py-1 rounded-full text-xs font-bold uppercase transition-all cursor-pointer ${
+                  voiceOn ? 'bg-[#38BDF8] text-[#080C14]' : 'bg-slate-800 text-slate-400'
+                }`}
+              >
+                {voiceOn ? 'on' : 'off'}
+              </button>
+            </div>
+
+            {/* 2 ] proxymity on */}
+            <div className="flex items-center justify-between py-2 border-b border-slate-800/80">
+              <span className="text-xs font-bold text-slate-200">
+                2 ] proxymity
+              </span>
+              <button
+                onClick={() => setProxymityOn(!proxymityOn)}
+                className={`px-3 py-1 rounded-full text-xs font-bold uppercase transition-all cursor-pointer ${
+                  proxymityOn ? 'bg-[#38BDF8] text-[#080C14]' : 'bg-slate-800 text-slate-400'
+                }`}
+              >
+                {proxymityOn ? 'on' : 'off'}
+              </button>
+            </div>
+
+            {/* 3 ] blutooth on */}
+            <div className="flex items-center justify-between py-2 border-b border-slate-800/80">
+              <span className="text-xs font-bold text-slate-200">
+                3 ] blutooth
+              </span>
+              <button
+                onClick={() => setBlutoothOn(!blutoothOn)}
+                className={`px-3 py-1 rounded-full text-xs font-bold uppercase transition-all cursor-pointer ${
+                  blutoothOn ? 'bg-[#38BDF8] text-[#080C14]' : 'bg-slate-800 text-slate-400'
+                }`}
+              >
+                {blutoothOn ? 'on' : 'off'}
+              </button>
+            </div>
+
+            {/* Done button */}
+            <div className="pt-2">
+              <button
+                onClick={() => {
+                  setShowStartWindow(false);
+                  showToast('ƦƗƉƐƦ Active in background!');
+                }}
+                className="w-full py-2.5 rounded-xl bg-[#0284C7] hover:bg-sky-500 text-white font-bold text-xs tracking-wider shadow cursor-pointer transition-all"
+              >
+                Done
+              </button>
+            </div>
+
           </div>
         </div>
       )}
 
     </div>
-  );
-}
-
-// Compact Earbuds SVGs
-function LeftEarbudSvg() {
-  return (
-    <svg viewBox="0 0 100 130" className="w-full h-full drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">
-      <defs>
-        <linearGradient id="budLeftGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#ffffff" />
-          <stop offset="60%" stopColor="#e2e8f0" />
-          <stop offset="100%" stopColor="#94a3b8" />
-        </linearGradient>
-      </defs>
-      <rect x="52" y="50" width="14" height="65" rx="7" fill="url(#budLeftGrad)" />
-      <rect x="52" y="108" width="14" height="7" rx="3.5" fill="#64748b" />
-      <circle cx="45" cy="42" r="26" fill="url(#budLeftGrad)" />
-      <ellipse cx="24" cy="42" rx="14" ry="19" fill="#f1f5f9" opacity="0.9" />
-      <ellipse cx="14" cy="42" rx="4" ry="11" fill="#334155" />
-      <rect x="55" y="60" width="8" height="26" rx="4" fill="#38bdf8" />
-      <text x="59" y="100" fill="#64748b" fontSize="8" fontWeight="bold" textAnchor="middle">L</text>
-    </svg>
-  );
-}
-
-function RightEarbudSvg() {
-  return (
-    <svg viewBox="0 0 100 130" className="w-full h-full drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">
-      <defs>
-        <linearGradient id="budRightGrad" x1="100%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor="#ffffff" />
-          <stop offset="60%" stopColor="#e2e8f0" />
-          <stop offset="100%" stopColor="#94a3b8" />
-        </linearGradient>
-      </defs>
-      <rect x="34" y="50" width="14" height="65" rx="7" fill="url(#budRightGrad)" />
-      <rect x="34" y="108" width="14" height="7" rx="3.5" fill="#64748b" />
-      <circle cx="55" cy="42" r="26" fill="url(#budRightGrad)" />
-      <ellipse cx="76" cy="42" rx="14" ry="19" fill="#f1f5f9" opacity="0.9" />
-      <ellipse cx="86" cy="42" rx="11" ry="11" fill="#334155" />
-      <rect x="37" y="60" width="8" height="26" rx="4" fill="#38bdf8" />
-      <text x="41" y="100" fill="#64748b" fontSize="8" fontWeight="bold" textAnchor="middle">R</text>
-    </svg>
-  );
-}
-
-function EarbudsCaseSvg() {
-  return (
-    <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-[0_4px_8px_rgba(0,0,0,0.6)]">
-      <defs>
-        <linearGradient id="caseGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#f8fafc" />
-          <stop offset="50%" stopColor="#e2e8f0" />
-          <stop offset="100%" stopColor="#64748b" />
-        </linearGradient>
-      </defs>
-      <rect x="18" y="24" width="64" height="60" rx="20" fill="url(#caseGrad)" />
-      <line x1="18" y1="46" x2="82" y2="46" stroke="#94a3b8" strokeWidth="1.5" />
-      <rect x="42" y="44" width="16" height="4" rx="2" fill="#cbd5e1" />
-      <circle cx="50" cy="62" r="2.5" fill="#38bdf8" />
-    </svg>
   );
 }

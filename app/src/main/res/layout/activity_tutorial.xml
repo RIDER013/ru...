@@ -3,100 +3,95 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="20dp"
-    android:gravity="center_horizontal"
-    android:background="#121212">
+    android:background="#080C14"
+    android:padding="24dp"
+    android:gravity="center_horizontal">
 
+    <!-- Top Bar with Back Button -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="24dp">
+
+        <Button
+            android:id="@+id/btnBack"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="← back"
+            android:textSize="12sp"
+            android:textColor="#94A3B8"
+            android:backgroundTint="#1E293B"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"/>
+
+        <TextView
+            android:id="@+id/txtTestType"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="test"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:gravity="end"
+            android:textAllCaps="true"/>
+    </LinearLayout>
+
+    <!-- Center Content:
+         click sensor
+         conectyvity
+         dot (White color -> Sky Blue on connectivity)
+         not conectyvity (if not connected) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center">
+
+        <!-- conectyvity label -->
+        <TextView
+            android:id="@+id/txtConnectivityLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="conectyvity"
+            android:textSize="16sp"
+            android:textColor="#E2E8F0"
+            android:textStyle="bold"
+            android:letterSpacing="0.04"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- Dot: White color circle, turns Sky Blue if connectivity is found -->
+        <View
+            android:id="@+id/viewConnectivityDot"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:background="@drawable/circle_white_dot"
+            android:layout_marginBottom="14dp"/>
+
+        <!-- not conectyvity text (shown if not connected) -->
+        <TextView
+            android:id="@+id/txtNotConnectivity"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="not conectyvity"
+            android:textSize="13sp"
+            android:textColor="#EF4444"
+            android:textStyle="bold"
+            android:visibility="visible"/>
+    </LinearLayout>
+
+    <!-- Bottom: created by ƦƗƉƐƦ -->
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Rider Assistant - Live Test &amp; Tutorial"
-        android:textSize="20sp"
-        android:textStyle="bold"
-        android:textColor="#FFFFFF"
-        android:layout_marginBottom="20dp"/>
-
-    <!-- 1. Proximity Sensor Test Card -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:background="#1E1E1E"
-        android:padding="15dp"
-        android:layout_marginBottom="15dp">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="1. Proximity Sensor (Camera Right Side)"
-            android:textColor="#03DAC5"
-            android:textStyle="bold"/>
-
-        <TextView
-            android:id="@+id/txtProxStatus"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Status: Pending ❌ (Cover camera sensor with hand)"
-            android:textColor="#B0BEC5"
-            android:layout_marginTop="5dp"/>
-    </LinearLayout>
-
-    <!-- 2. Voice Command Test Card -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:background="#1E1E1E"
-            android:padding="15dp"
-        android:layout_marginBottom="15dp">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="2. Voice Command ('Rider' / 'Varti')"
-            android:textColor="#03DAC5"
-            android:textStyle="bold"/>
-
-        <TextView
-            android:id="@+id/txtVoiceStatus"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Status: Pending ❌ (Say 'Rider' clearly)"
-            android:textColor="#B0BEC5"
-            android:layout_marginTop="5dp"/>
-    </LinearLayout>
-
-    <!-- 3. Bluetooth Earbuds Test Card -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:background="#1E1E1E"
-        android:padding="15dp"
-        android:layout_marginBottom="25dp">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="3. Bluetooth Earbuds Connection"
-            android:textColor="#03DAC5"
-            android:textStyle="bold"/>
-
-        <TextView
-            android:id="@+id/txtBtStatus"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Status: Checking Bluetooth Connection..."
-            android:textColor="#B0BEC5"
-            android:layout_marginTop="5dp"/>
-    </LinearLayout>
-
-    <Button
-        android:id="@+id/btnFinishTest"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Finish &amp; Start Assistant"
-        android:backgroundTint="#6200EE"
-        android:enabled="false"/>
+        android:text="created by ƦƗƉƐƦ"
+        android:textSize="10sp"
+        android:textColor="#64748B"
+        android:gravity="center"
+        android:letterSpacing="0.08"
+        android:layout_marginBottom="8dp"/>
 
 </LinearLayout>
