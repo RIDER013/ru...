@@ -26,17 +26,13 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
 import android.view.KeyEvent
-import kotlin.math.abs
 import kotlin.math.sqrt
 
 /**
  * VoiceWakeWordService:
- * True Low-Power On-Device Wake-Word Engine (like "Hey Google" / Picovoice).
- * - NO Android SpeechRecognizer looping (NO annoying dings, beeps, or restart loops).
- * - Continuous, silent 16kHz audio stream processed entirely on-device.
- * - Detects syllable cadence & acoustic resonance of "RIDER", "VARTI", and "BUDDY".
- * - Proximity Hand-Wave Sensor integration.
- * - Bluetooth Earbud Touch Sensor (MediaSession / onKeyEvent) integration.
+ * True Low-Power On-Device Wake-Word Engine with strict single-swipe debounce.
+ * - Prevents multiple/double/triple scrolling when saying "Rider" or "Varti".
+ * - Enforces a strict 2.5 second cooldown between swipes.
  */
 class VoiceWakeWordService : Service() {
 
@@ -91,9 +87,8 @@ class VoiceWakeWordService : Service() {
     }
 
     /**
-     * TRUE ON-DEVICE WAKE-WORD ACOUSTIC ENGINE (ZERO BEEPS, ZERO LOOPS):
-     * Runs directly on raw audio buffer without invoking system SpeechRecognizer.
-     * Matches the two-syllable vocal burst structure of "Rai-der", "Var-ti", and "Bud-dy".
+     * TRUE ON-DEVICE WAKE-WORD ACOUSTIC ENGINE WITH STRICT SINGLE-SWIPE DEBOUNCE:
+     * - 2.5 second strict cooldown between triggers to prevent 2-3 reels scrolling at once.
      */
     @SuppressLint("MissingPermission")
     private fun startSilentWakeWordEngine() {
@@ -123,7 +118,7 @@ class VoiceWakeWordService : Service() {
                 }
 
                 audioRecord?.startRecording()
-                Log.d(TAG, "Silent On-Device Wake-Word Engine active. Zero beeps, continuous listening.")
+                Log.d(TAG, "Silent On-Device Wake-Word Engine active with strict 2.5s debounce.")
 
                 val frame = ShortArray(frameSamples)
                 var ambientBaseline = 150.0
@@ -146,13 +141,9 @@ class VoiceWakeWordService : Service() {
 
                     // 1. Calculate Frame RMS Energy
                     var sumSq = 0.0
-                    var zeroCrossings = 0
                     for (i in 0 until readSamples) {
                         val sample = frame[i]
                         sumSq += (sample * sample).toDouble()
-                        if (i > 0 && ((frame[i] > 0 && frame[i - 1] <= 0) || (frame[i] < 0 && frame[i - 1] >= 0))) {
-                            zeroCrossings++
-                        }
                     }
                     val frameRms = sqrt(sumSq / readSamples)
 
@@ -180,46 +171,37 @@ class VoiceWakeWordService : Service() {
                         if (syllablePhase == 1) {
                             syllable1Frames++
                         } else if (syllablePhase == 2) {
-                            // Energy rose again after dip -> moved to Syllable 2
                             syllablePhase = 3
                             syllable2Frames = 1
                         } else if (syllablePhase == 3) {
                             syllable2Frames++
                         }
                     } else {
-                        // Frame is below speech threshold (silence or consonant dip)
                         if (inSpeech) {
                             speechFrames++
 
                             if (syllablePhase == 1 && syllable1Frames >= 5) {
-                                // Transition from Syllable 1 to inter-syllabic dip (/d/ or /t/ stop)
                                 syllablePhase = 2
                                 dipFrames = 1
                             } else if (syllablePhase == 2) {
                                 dipFrames++
                                 if (dipFrames > 12) {
-                                    // Dip too long, reset
                                     inSpeech = false
                                     syllablePhase = 0
                                 }
                             } else if (syllablePhase == 3) {
-                                // End of Syllable 2 -> Verify Word Match!
                                 val now = System.currentTimeMillis()
                                 val totalDurationMs = speechFrames * 20
 
-                                // "Rider", "Varti", "Buddy" have:
-                                // Syllable 1: 100ms - 320ms (5 - 16 frames)
-                                // Inter-syllable dip: 30ms - 180ms (2 - 9 frames)
-                                // Syllable 2: 80ms - 260ms (4 - 13 frames)
-                                // Total Duration: 260ms - 750ms
                                 val isTwoSyllableWakeWord = syllable1Frames in 4..18 &&
                                         dipFrames in 1..10 &&
                                         syllable2Frames in 3..15 &&
                                         totalDurationMs in 240..780
 
-                                if (isTwoSyllableWakeWord && (now - lastDetectionTime > 850)) {
+                                // STRICT 2500ms (2.5 seconds) cooldown to prevent 2-3 reels scrolling at once!
+                                if (isTwoSyllableWakeWord && (now - lastDetectionTime > 2500)) {
                                     lastDetectionTime = now
-                                    Log.d(TAG, "WAKE-WORD RECOGNIZED! ($wakeWord cadence: s1=$syllable1Frames, dip=$dipFrames, s2=$syllable2Frames, total=${totalDurationMs}ms). Dispathing swipe...")
+                                    Log.d(TAG, "WAKE-WORD RECOGNIZED! ($wakeWord). Dispatching EXACTLY ONE swipe up...")
                                     triggerHapticFeedback()
                                     RiderAccessibilityService.instance?.swipeUp()
                                 }
@@ -230,7 +212,6 @@ class VoiceWakeWordService : Service() {
                         }
                     }
 
-                    // Reset if utterance exceeds max duration (1.1s)
                     if (speechFrames > 55) {
                         inSpeech = false
                         syllablePhase = 0
@@ -271,7 +252,7 @@ class VoiceWakeWordService : Service() {
 
                         if (isProximityEnabled && (distance < max || distance <= 3f)) {
                             val now = System.currentTimeMillis()
-                            if (now - lastTriggerTime > 650) {
+                            if (now - lastTriggerTime > 1200) { // 1.2s debounce for proximity wave
                                 lastTriggerTime = now
                                 Log.d(TAG, "Proximity hand wave detected! Swiping up at center...")
                                 triggerHapticFeedback()
@@ -303,6 +284,8 @@ class VoiceWakeWordService : Service() {
             mediaSession = MediaSession(this, "RiderEarbudsSession").apply {
                 setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
                 setCallback(object : MediaSession.Callback() {
+                    private var lastEarbudClickTime = 0L
+
                     override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
                         val keyEvent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                             mediaButtonIntent.getParcelableExtra(Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
@@ -312,9 +295,13 @@ class VoiceWakeWordService : Service() {
                         }
 
                         if (keyEvent?.action == KeyEvent.ACTION_DOWN) {
-                            Log.d(TAG, "Real Earbud Touch Sensor clicked: key ${keyEvent.keyCode}! Swiping up...")
-                            triggerHapticFeedback()
-                            RiderAccessibilityService.instance?.swipeUp()
+                            val now = System.currentTimeMillis()
+                            if (now - lastEarbudClickTime > 1000) { // 1.0s debounce for earbud clicks
+                                lastEarbudClickTime = now
+                                Log.d(TAG, "Real Earbud Touch Sensor clicked: key ${keyEvent.keyCode}! Swiping up...")
+                                triggerHapticFeedback()
+                                RiderAccessibilityService.instance?.swipeUp()
+                            }
                             return true
                         }
                         return super.onMediaButtonEvent(mediaButtonIntent)
