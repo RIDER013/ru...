@@ -33,7 +33,7 @@
             android:textStyle="bold"/>
 
         <TextView
-            android:id="@+n/txtProxStatus"
+            android:id="@+id/txtProxStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Status: Pending ❌ (Cover camera sensor with hand)"
@@ -58,7 +58,7 @@
             android:textStyle="bold"/>
 
         <TextView
-            android:id="@+n/txtVoiceStatus"
+            android:id="@+id/txtVoiceStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Status: Pending ❌ (Say 'Rider' clearly)"
@@ -83,7 +83,7 @@
             android:textStyle="bold"/>
 
         <TextView
-            android:id="@+n/txtBtStatus"
+            android:id="@+id/txtBtStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Status: Checking Bluetooth Connection..."
@@ -92,7 +92,7 @@
     </LinearLayout>
 
     <Button
-        android:id="@+n/btnFinishTest"
+        android:id="@+id/btnFinishTest"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Finish &amp; Start Assistant"

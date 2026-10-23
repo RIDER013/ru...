@@ -15,10 +15,13 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioRecord
+import android.media.AudioManager
 import android.media.MediaRecorder
 import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.os.Build
 import android.os.IBinder
 import android.os.VibrationEffect
@@ -30,13 +33,11 @@ import kotlin.math.sqrt
 
 /**
  * VoiceWakeWordService:
- * True Low-Power On-Device Wake-Word Engine with strict single-swipe debounce.
- * - Prevents multiple/double/triple scrolling when saying "Rider" or "Varti".
- * - Enforces a strict 2.5 second cooldown between swipes.
+ * True Low-Power On-Device Wake-Word Engine with robust Bluetooth MediaSession & Proximity handling.
  */
 class VoiceWakeWordService : Service() {
 
-    private var wakeWord = "VARTI"
+    private var wakeWord = "RIDER"
 
     // Continuous On-Device Audio Engine
     @Volatile
@@ -49,8 +50,9 @@ class VoiceWakeWordService : Service() {
     private var proximitySensor: Sensor? = null
     private var proximityListener: SensorEventListener? = null
 
-    // MediaSession to capture real Bluetooth Earbud Touch Sensor clicks
+    // MediaSession & AudioManager to capture real Bluetooth Earbud Touch Sensor clicks globally
     private var mediaSession: MediaSession? = null
+    private var audioManager: AudioManager? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -58,14 +60,16 @@ class VoiceWakeWordService : Service() {
         createNotificationChannel()
 
         initProximitySensor()
-        initMediaSessionForEarbuds()
+        if (isBluetoothEnabled) {
+            initMediaSessionForEarbuds()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        wakeWord = intent?.getStringExtra(EXTRA_WAKE_WORD) ?: "VARTI"
+        wakeWord = intent?.getStringExtra(EXTRA_WAKE_WORD) ?: "RIDER"
 
         try {
-            val notification = buildForegroundNotification("RIDER Active: Listening for '$wakeWord' in background...")
+            val notification = buildForegroundNotification("RIDER Active: Listening for '$wakeWord' / Earbud Taps...")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(
                     NOTIFICATION_ID,
@@ -88,7 +92,6 @@ class VoiceWakeWordService : Service() {
 
     /**
      * TRUE ON-DEVICE WAKE-WORD ACOUSTIC ENGINE WITH STRICT SINGLE-SWIPE DEBOUNCE:
-     * - 2.5 second strict cooldown between triggers to prevent 2-3 reels scrolling at once.
      */
     @SuppressLint("MissingPermission")
     private fun startSilentWakeWordEngine() {
@@ -118,19 +121,18 @@ class VoiceWakeWordService : Service() {
                 }
 
                 audioRecord?.startRecording()
-                Log.d(TAG, "Silent On-Device Wake-Word Engine active with strict 2.5s debounce.")
+                Log.d(TAG, "Silent On-Device Wake-Word Engine active.")
 
                 val frame = ShortArray(frameSamples)
                 var ambientBaseline = 150.0
                 var lastDetectionTime = 0L
 
-                // Syllabic envelope tracking
                 var inSpeech = false
                 var speechFrames = 0
                 var syllable1Frames = 0
                 var dipFrames = 0
                 var syllable2Frames = 0
-                var syllablePhase = 0 // 0=idle, 1=syllable1, 2=dip, 3=syllable2
+                var syllablePhase = 0
 
                 while (isAudioRunning) {
                     val readSamples = audioRecord?.read(frame, 0, frame.size) ?: 0
@@ -139,7 +141,6 @@ class VoiceWakeWordService : Service() {
                         continue
                     }
 
-                    // 1. Calculate Frame RMS Energy
                     var sumSq = 0.0
                     for (i in 0 until readSamples) {
                         val sample = frame[i]
@@ -147,7 +148,6 @@ class VoiceWakeWordService : Service() {
                     }
                     val frameRms = sqrt(sumSq / readSamples)
 
-                    // 2. Adaptive Ambient Noise Baseline
                     if (!inSpeech) {
                         ambientBaseline = (ambientBaseline * 0.96) + (frameRms * 0.04)
                     }
@@ -155,7 +155,6 @@ class VoiceWakeWordService : Service() {
                     val speechThreshold = maxOf(ambientBaseline * 2.3, 400.0)
                     val isVoiceFrame = frameRms > speechThreshold
 
-                    // 3. Cadence & Syllable State Machine
                     if (isVoiceFrame) {
                         if (!inSpeech) {
                             inSpeech = true
@@ -198,7 +197,6 @@ class VoiceWakeWordService : Service() {
                                         syllable2Frames in 3..15 &&
                                         totalDurationMs in 240..780
 
-                                // STRICT 2500ms (2.5 seconds) cooldown to prevent 2-3 reels scrolling at once!
                                 if (isTwoSyllableWakeWord && (now - lastDetectionTime > 2500)) {
                                     lastDetectionTime = now
                                     Log.d(TAG, "WAKE-WORD RECOGNIZED! ($wakeWord). Dispatching EXACTLY ONE swipe up...")
@@ -246,13 +244,13 @@ class VoiceWakeWordService : Service() {
                     private var lastTriggerTime = 0L
 
                     override fun onSensorChanged(event: SensorEvent?) {
-                        if (event == null) return
+                        if (!isProximityEnabled || event == null) return
                         val distance = event.values[0]
                         val max = proximitySensor?.maximumRange ?: 5f
 
-                        if (isProximityEnabled && (distance < max || distance <= 3f)) {
+                        if (distance < max || distance <= 2.5f) {
                             val now = System.currentTimeMillis()
-                            if (now - lastTriggerTime > 1200) { // 1.2s debounce for proximity wave
+                            if (now - lastTriggerTime > 1000) {
                                 lastTriggerTime = now
                                 Log.d(TAG, "Proximity hand wave detected! Swiping up at center...")
                                 triggerHapticFeedback()
@@ -277,12 +275,34 @@ class VoiceWakeWordService : Service() {
     }
 
     /**
-     * MediaSession: Intercepts physical Bluetooth Earbud touch sensor taps (Play/Pause, Next, Hook)
+     * ROBUST BLUETOOTH MEDIASESSION & AUDIO FOCUS ROUTING:
      */
     private fun initMediaSessionForEarbuds() {
         try {
-            mediaSession = MediaSession(this, "RiderEarbudsSession").apply {
+            audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val focusRequest = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                            .build()
+                    )
+                    .build()
+                audioManager?.requestAudioFocus(focusRequest)
+            }
+
+            mediaSession = MediaSession(this, "RiderEarbudsActiveSession").apply {
                 setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
+
+                setPlaybackState(
+                    PlaybackState.Builder()
+                        .setState(PlaybackState.STATE_PLAYING, 0L, 1.0f)
+                        .setActions(PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_PLAY)
+                        .build()
+                )
+
                 setCallback(object : MediaSession.Callback() {
                     private var lastEarbudClickTime = 0L
 
@@ -296,9 +316,9 @@ class VoiceWakeWordService : Service() {
 
                         if (keyEvent?.action == KeyEvent.ACTION_DOWN) {
                             val now = System.currentTimeMillis()
-                            if (now - lastEarbudClickTime > 1000) { // 1.0s debounce for earbud clicks
+                            if (now - lastEarbudClickTime > 1000) {
                                 lastEarbudClickTime = now
-                                Log.d(TAG, "Real Earbud Touch Sensor clicked: key ${keyEvent.keyCode}! Swiping up...")
+                                Log.d(TAG, "ROBUST BLUETOOTH EARBUD CLICKED: key ${keyEvent.keyCode}! Triggering swipeUp()...")
                                 triggerHapticFeedback()
                                 RiderAccessibilityService.instance?.swipeUp()
                             }
@@ -309,9 +329,10 @@ class VoiceWakeWordService : Service() {
                 })
                 isActive = true
             }
-            Log.d(TAG, "MediaSession for earbuds touch sensor active")
+
+            Log.d(TAG, "Robust Bluetooth MediaSession initialized successfully")
         } catch (e: Exception) {
-            Log.e(TAG, "Error setting up MediaSession for earbuds: ${e.message}")
+            Log.e(TAG, "Error setting up robust Bluetooth MediaSession: ${e.message}")
         }
     }
 
@@ -409,7 +430,10 @@ class VoiceWakeWordService : Service() {
         @Volatile
         var isProximityEnabled: Boolean = true
 
-        fun start(context: Context, wakeWord: String = "VARTI") {
+        @Volatile
+        var isBluetoothEnabled: Boolean = true
+
+        fun start(context: Context, wakeWord: String = "RIDER") {
             try {
                 val intent = Intent(context, VoiceWakeWordService::class.java).apply {
                     putExtra(EXTRA_WAKE_WORD, wakeWord)

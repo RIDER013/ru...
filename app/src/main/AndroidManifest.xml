@@ -40,6 +40,10 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".TutorialActivity"
+            android:exported="false" />
+
         <!-- System Accessibility Service for Background Center Swipe Gestures -->
         <service
             android:name=".RiderAccessibilityService"

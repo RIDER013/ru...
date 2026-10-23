@@ -19,12 +19,15 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity(), SensorEventListener {
 
-    private var selectedAssistant = "VARTI" // "VARTI", "RIDER", "BUDDY"
+    private var selectedAssistant = "RIDER" // Only "RIDER" and "NEXT"
     private var proximitySensorEnabled = true
+    private var voiceControlEnabled = true
+    private var bluetoothControlEnabled = true
     private var currentTab = "home"
 
     // Proximity Sensor
@@ -46,7 +49,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var wakeWordIndicator: TextView
     private lateinit var proximityToggleBtn: Button
     private lateinit var testSwipeBtn: Button
-    private lateinit var tutorialBtn: Button // NEW: Tutorial & Test Button
+    private lateinit var tutorialBtn: Button
     private lateinit var accessibilityStatusBadge: TextView
 
     // Bottom Navigation Buttons
@@ -105,9 +108,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         if (event.sensor.type == Sensor.TYPE_PROXIMITY) {
             val distance = event.values[0]
             val maxRange = proximitySensor?.maximumRange ?: 5f
-            if (distance < maxRange || distance <= 3f) {
+            if (distance < maxRange || distance <= 2.5f) {
                 val now = System.currentTimeMillis()
-                if (now - lastProximityTriggerTime > 650) {
+                if (now - lastProximityTriggerTime > 1000) {
                     lastProximityTriggerTime = now
                     Log.d(TAG, "MainActivity Proximity wave detected! Triggering center swipe...")
                     triggerManualSwipe()
@@ -276,7 +279,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         layout.addView(wakeWordIndicator)
         updateWakeWordIndicator()
 
-        // Small Round Play Start Button
+        // Small Round Play Start Button -> Opens Configuration Dialog & Starts Assistant
         playStartBtn = Button(this).apply {
             text = "▶"
             textSize = 26f
@@ -291,7 +294,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
         layout.addView(playStartBtn)
 
-        // NEW: Interactive Tutorial & Test Activity Button
+        // Interactive Tutorial & Test Activity Button
         tutorialBtn = Button(this).apply {
             text = "🎬 Open Live Test & Tutorial"
             textSize = 13f
@@ -312,7 +315,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
         layout.addView(tutorialBtn)
 
-        // Single Combined Button for Wake Word Toggle
+        // Single Combined Button for Wake Word Toggle ("Rider" / "Next")
         toggleWakeWordBtn = Button(this).apply {
             textSize = 13f
             setTypeface(null, Typeface.BOLD)
@@ -379,17 +382,93 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             return
         }
 
-        VoiceWakeWordService.start(this, selectedAssistant)
-        Toast.makeText(this, "RIDER Active! Say \"$selectedAssistant\" or wave hand near sensor.", Toast.LENGTH_LONG).show()
-        moveTaskToBack(true)
+        // Show configuration dialog with Proximity, Voice, and Bluetooth switches
+        val dialogView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(40, 30, 40, 20)
+            setBackgroundColor(Color.parseColor("#101827"))
+        }
+
+        val dialogTitle = TextView(this).apply {
+            text = "RIDER Start Configuration"
+            textSize = 16f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#38BDF8"))
+            setPadding(0, 0, 0, 20)
+        }
+        dialogView.addView(dialogTitle)
+
+        // 1. Proximity Sensor Switch
+        val switchProx = Switch(this).apply {
+            text = "Proximity Sensor Wave Control"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            isChecked = proximitySensorEnabled
+            setPadding(0, 10, 0, 15)
+        }
+        dialogView.addView(switchProx)
+
+        // 2. Voice Control Switch
+        val switchVoice = Switch(this).apply {
+            text = "Voice Control ($selectedAssistant / Next)"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            isChecked = voiceControlEnabled
+            setPadding(0, 10, 0, 15)
+        }
+        dialogView.addView(switchVoice)
+
+        // 3. Bluetooth Earbuds Switch
+        val switchBluetooth = Switch(this).apply {
+            text = "Bluetooth Earbuds Tap Control"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            isChecked = bluetoothControlEnabled
+            setPadding(0, 10, 0, 20)
+        }
+        dialogView.addView(switchBluetooth)
+
+        val dialogDesc = TextView(this).apply {
+            text = "When you click 'Done', RIDER will run in the background with your chosen settings."
+            textSize = 11f
+            setTextColor(Color.parseColor("#94A3B8"))
+            setPadding(0, 0, 0, 20)
+        }
+        dialogView.addView(dialogDesc)
+
+        AlertDialog.Builder(this)
+            .setView(dialogView)
+            .setPositiveButton("Done") { _, _ ->
+                proximitySensorEnabled = switchProx.isChecked
+                voiceControlEnabled = switchVoice.isChecked
+                bluetoothControlEnabled = switchBluetooth.isChecked
+
+                VoiceWakeWordService.isProximityEnabled = proximitySensorEnabled
+                VoiceWakeWordService.isBluetoothEnabled = bluetoothControlEnabled
+                updateProximityButtonState()
+
+                if (proximitySensorEnabled && proximitySensor != null) {
+                    sensorManager?.registerListener(this, proximitySensor, SensorManager.SENSOR_DELAY_UI)
+                } else {
+                    sensorManager?.unregisterListener(this)
+                }
+
+                if (voiceControlEnabled || bluetoothControlEnabled) {
+                    VoiceWakeWordService.start(this, selectedAssistant)
+                    Toast.makeText(this, "RIDER Active! Settings configured.", Toast.LENGTH_LONG).show()
+                } else {
+                    VoiceWakeWordService.stop(this)
+                    Toast.makeText(this, "RIDER Active! Proximity sensor only.", Toast.LENGTH_LONG).show()
+                }
+
+                moveTaskToBack(true)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun toggleWakeWord() {
-        selectedAssistant = when (selectedAssistant) {
-            "VARTI" -> "RIDER"
-            "RIDER" -> "BUDDY"
-            else -> "VARTI"
-        }
+        selectedAssistant = if (selectedAssistant == "RIDER") "NEXT" else "RIDER"
         updateWakeWordIndicator()
         updateWakeWordButtonText()
         updateTestButtonText()
@@ -416,19 +495,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun updateWakeWordIndicator() {
-        val display = if (selectedAssistant == "VARTI") "Varti (वरती)" else selectedAssistant
-        wakeWordIndicator.text = "Active Wake-Word: $display"
+        wakeWordIndicator.text = "Active Wake-Word: $selectedAssistant"
         wakeWordIndicator.setTextColor(Color.parseColor("#38BDF8"))
     }
 
     private fun updateWakeWordButtonText() {
-        val nextOption = when (selectedAssistant) {
-            "VARTI" -> "Rider"
-            "RIDER" -> "Buddy"
-            else -> "Varti"
-        }
-        val display = if (selectedAssistant == "VARTI") "Varti (वरती)" else selectedAssistant
-        toggleWakeWordBtn.text = "Say $display  (Tap for $nextOption)"
+        val nextOption = if (selectedAssistant == "RIDER") "Next" else "Rider"
+        toggleWakeWordBtn.text = "Say $selectedAssistant  (Tap for $nextOption)"
     }
 
     private fun updateProximityButtonState() {
