@@ -46,8 +46,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var wakeWordIndicator: TextView
     private lateinit var proximityToggleBtn: Button
     private lateinit var testSwipeBtn: Button
-    private lateinit var testProximityBtn: Button
-    private lateinit var tutorialStatusText: TextView
     private lateinit var accessibilityStatusBadge: TextView
 
     // Bottom Navigation Buttons
@@ -108,11 +106,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             val maxRange = proximitySensor?.maximumRange ?: 5f
             if (distance < maxRange || distance <= 3f) {
                 val now = System.currentTimeMillis()
-                if (now - lastProximityTriggerTime > 800) {
+                if (now - lastProximityTriggerTime > 650) {
                     lastProximityTriggerTime = now
                     Log.d(TAG, "MainActivity Proximity wave detected! Triggering center swipe...")
-                    tutorialStatusText.text = "Status: Proximity Wave Detected! ⚡"
-                    tutorialStatusText.setTextColor(Color.parseColor("#34D399"))
                     triggerManualSwipe()
                 }
             }
@@ -273,7 +269,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
-                bottomMargin = 16
+                bottomMargin = 24
             }
         }
         layout.addView(wakeWordIndicator)
@@ -286,9 +282,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#020617"))
             background = createRoundedDrawable("#38BDF8", "#7DD3FC", 100f)
-            layoutParams = LinearLayout.LayoutParams(160, 160).apply {
+            layoutParams = LinearLayout.LayoutParams(180, 180).apply {
                 gravity = Gravity.CENTER
-                bottomMargin = 16
+                bottomMargin = 24
             }
             setOnClickListener { handleLetsStart() }
         }
@@ -296,17 +292,17 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         // Single Combined Button for Wake Word Toggle
         toggleWakeWordBtn = Button(this).apply {
-            textSize = 12f
+            textSize = 13f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.WHITE)
-            background = createRoundedDrawable("#101827", "#38BDF8", 16f)
+            background = createRoundedDrawable("#101827", "#38BDF8", 18f)
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
-                bottomMargin = 10
+                bottomMargin = 14
             }
-            setPadding(24, 20, 24, 20)
+            setPadding(28, 24, 28, 24)
             setOnClickListener { toggleWakeWord() }
         }
         layout.addView(toggleWakeWordBtn)
@@ -320,9 +316,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
-                bottomMargin = 10
+                bottomMargin = 14
             }
-            setPadding(24, 18, 24, 18)
+            setPadding(24, 20, 24, 20)
             setOnClickListener { toggleProximitySensor() }
         }
         layout.addView(proximityToggleBtn)
@@ -338,75 +334,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
                 gravity = Gravity.CENTER
-                bottomMargin = 14
             }
-            setPadding(24, 12, 24, 12)
+            setPadding(28, 14, 28, 14)
             setOnClickListener { triggerManualSwipe() }
         }
         layout.addView(testSwipeBtn)
         updateTestButtonText()
-
-        // TUTORIAL & LIVE TESTING CARD
-        // "aani tutorial add kar oky khali tutorial add kar aani tyat sensor test karun baghaych aani voice ne pan test karun baghaych as oky"
-        val tutorialCard = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(16, 14, 16, 14)
-            background = createRoundedDrawable("#101827", "#1E293B", 16f)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 4
-                bottomMargin = 10
-            }
-        }
-
-        val tutorialTitle = TextView(this).apply {
-            text = "📖 HOW TO TEST & USE (TUTORIAL)"
-            textSize = 10.5f
-            setTextColor(Color.parseColor("#38BDF8"))
-            setTypeface(null, Typeface.BOLD)
-            setPadding(0, 0, 0, 6)
-        }
-        tutorialCard.addView(tutorialTitle)
-
-        val tutorialDesc = TextView(this).apply {
-            text = "1. Proximity Sensor: Wave hand near top earpiece.\n" +
-                    "2. Voice Command: Say 'Varti', 'Rider', or 'Buddy'.\n" +
-                    "3. Earbuds: Tap earbud touch sensor."
-            textSize = 10f
-            setTextColor(Color.parseColor("#94A3B8"))
-            setPadding(0, 0, 0, 10)
-        }
-        tutorialCard.addView(tutorialDesc)
-
-        // Live Test Status indicator
-        tutorialStatusText = TextView(this).apply {
-            text = "Status: Ready for testing..."
-            textSize = 10f
-            setTextColor(Color.parseColor("#FBBF24"))
-            setTypeface(null, Typeface.BOLD)
-            setPadding(0, 0, 0, 8)
-        }
-        tutorialCard.addView(tutorialStatusText)
-
-        // Dedicated Test Proximity Button
-        testProximityBtn = Button(this).apply {
-            text = "Test Proximity Wave Now"
-            textSize = 10.5f
-            setTextColor(Color.WHITE)
-            background = createRoundedDrawable("#0284C7", "#38BDF8", 12f)
-            setPadding(16, 10, 16, 10)
-            setOnClickListener {
-                tutorialStatusText.text = "Status: Proximity Wave Tested Successfully! ⚡"
-                tutorialStatusText.setTextColor(Color.parseColor("#34D399"))
-                triggerManualSwipe()
-                Toast.makeText(this@MainActivity, "Proximity Sensor Wave Test Passed!", Toast.LENGTH_SHORT).show()
-            }
-        }
-        tutorialCard.addView(testProximityBtn)
-
-        layout.addView(tutorialCard)
 
         return layout
     }
