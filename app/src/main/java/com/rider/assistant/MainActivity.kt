@@ -46,6 +46,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var wakeWordIndicator: TextView
     private lateinit var proximityToggleBtn: Button
     private lateinit var testSwipeBtn: Button
+    private lateinit var tutorialBtn: Button // NEW: Tutorial & Test Button
     private lateinit var accessibilityStatusBadge: TextView
 
     // Bottom Navigation Buttons
@@ -289,6 +290,27 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             setOnClickListener { handleLetsStart() }
         }
         layout.addView(playStartBtn)
+
+        // NEW: Interactive Tutorial & Test Activity Button
+        tutorialBtn = Button(this).apply {
+            text = "🎬 Open Live Test & Tutorial"
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            background = createRoundedDrawable("#7C3AED", "#A78BFA", 18f)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = 14
+            }
+            setPadding(28, 22, 28, 22)
+            setOnClickListener {
+                val intent = Intent(this@MainActivity, TutorialActivity::class.java)
+                startActivity(intent)
+            }
+        }
+        layout.addView(tutorialBtn)
 
         // Single Combined Button for Wake Word Toggle
         toggleWakeWordBtn = Button(this).apply {
